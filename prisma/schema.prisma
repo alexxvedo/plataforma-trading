@@ -1,0 +1,261 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String           @id
+  name            String
+  email           String
+  emailVerified   Boolean          @default(false)
+  image           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @default(now()) @updatedAt
+  sessions        Session[]
+  accounts        Account[]
+  tradingAccounts TradingAccount[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@map("verification")
+}
+
+// ============================================
+// MT4/MT5 Trading System Models
+// ============================================
+
+model TradingAccount {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Account details
+  accountNumber String
+  broker        String
+  platform      Platform @default(MT5)
+  accountType   String?  // Demo, Real, Contest, etc.
+  
+  // API Authentication
+  apiKey        String   @unique @default(cuid())
+  apiKeyHash    String?  // Hashed version for security
+  
+  // Account status
+  isActive      Boolean  @default(true)
+  lastSync      DateTime?
+  
+  // Copy trading settings
+  isMaster      Boolean  @default(false)
+  isSlave       Boolean  @default(false)
+  
+  // Metadata
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  snapshots     AccountSnapshot[]
+  positions     Position[]
+  tradesHistory TradeHistory[]
+  masterOf      CopyTradingRelation[] @relation("MasterAccount")
+  slaveOf       CopyTradingRelation[] @relation("SlaveAccount")
+
+  @@unique([userId, accountNumber, broker])
+  @@index([userId])
+  @@index([apiKey])
+  @@map("trading_account")
+}
+
+model AccountSnapshot {
+  id                String          @id @default(cuid())
+  tradingAccountId  String
+  tradingAccount    TradingAccount  @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  
+  // Account metrics
+  balance           Float
+  equity            Float
+  margin            Float
+  freeMargin        Float
+  marginLevel       Float?
+  profit            Float
+  credit            Float?
+  
+  // Server info
+  leverage          Int?
+  serverName        String?
+  
+  timestamp         DateTime        @default(now())
+
+  @@index([tradingAccountId, timestamp])
+  @@map("account_snapshot")
+}
+
+model Position {
+  id                String          @id @default(cuid())
+  tradingAccountId  String
+  tradingAccount    TradingAccount  @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  
+  // Position details
+  ticket            String          // MT4/MT5 order ticket
+  symbol            String
+  type              OrderType
+  volume            Float           // Lots
+  
+  // Prices
+  openPrice         Float
+  currentPrice      Float?
+  stopLoss          Float?
+  takeProfit        Float?
+  
+  // P&L
+  profit            Float
+  swap              Float?
+  commission        Float?
+  
+  // Timestamps
+  openTime          DateTime
+  updatedAt         DateTime        @updatedAt
+  
+  // Metadata
+  comment           String?
+  magicNumber       Int?
+
+  @@unique([tradingAccountId, ticket])
+  @@index([tradingAccountId])
+  @@index([symbol])
+  @@map("position")
+}
+
+model TradeHistory {
+  id                String          @id @default(cuid())
+  tradingAccountId  String
+  tradingAccount    TradingAccount  @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  
+  // Trade details
+  ticket            String
+  symbol            String
+  type              OrderType
+  volume            Float
+  
+  // Prices
+  openPrice         Float
+  closePrice        Float
+  stopLoss          Float?
+  takeProfit        Float?
+  
+  // P&L
+  profit            Float
+  swap              Float?
+  commission        Float?
+  
+  // Timestamps
+  openTime          DateTime
+  closeTime         DateTime
+  
+  // Metadata
+  comment           String?
+  magicNumber       Int?
+  
+  createdAt         DateTime        @default(now())
+
+  @@unique([tradingAccountId, ticket])
+  @@index([tradingAccountId, closeTime])
+  @@index([symbol])
+  @@map("trade_history")
+}
+
+model CopyTradingRelation {
+  id              String          @id @default(cuid())
+  
+  masterAccountId String
+  masterAccount   TradingAccount  @relation("MasterAccount", fields: [masterAccountId], references: [id], onDelete: Cascade)
+  
+  slaveAccountId  String
+  slaveAccount    TradingAccount  @relation("SlaveAccount", fields: [slaveAccountId], references: [id], onDelete: Cascade)
+  
+  // Copy settings
+  isActive        Boolean         @default(true)
+  riskMultiplier  Float           @default(1.0) // Lot size multiplier
+  
+  // Filters
+  allowedSymbols  String[]        // Empty = all symbols
+  maxLotSize      Float?
+  minLotSize      Float?
+  
+  // Timestamps
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([masterAccountId, slaveAccountId])
+  @@index([masterAccountId])
+  @@index([slaveAccountId])
+  @@map("copy_trading_relation")
+}
+
+// Enums
+enum Platform {
+  MT4
+  MT5
+}
+
+enum OrderType {
+  BUY
+  SELL
+  BUY_LIMIT
+  SELL_LIMIT
+  BUY_STOP
+  SELL_STOP
+}
