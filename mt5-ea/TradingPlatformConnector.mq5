@@ -9,7 +9,7 @@
 #property strict
 
 // Input parameters
-input string API_URL = "http://127.0.0.1:3000/api/ea";  // URL de tu API
+input string API_URL = "https://plataforma-trading.vercel.app/api/ea";  // URL de tu API
 input string API_KEY = "";                                 // API Key de tu cuenta
 input int    UPDATE_INTERVAL = 5;                         // Intervalo de actualización en segundos
 input bool   SEND_HISTORY = true;                         // Enviar historial al inicio
