@@ -19,8 +19,11 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith(route)
   );
 
-  // Obtén el token de sesión de las cookies
-  const sessionToken = request.cookies.get("better-auth.session_token");
+  // Obtén el token de sesión de las cookies - Better Auth puede usar diferentes nombres
+  const sessionToken = 
+    request.cookies.get("better-auth.session_token")?.value ||
+    request.cookies.get("session_token")?.value ||
+    request.cookies.get("better-auth_session")?.value;
 
   // Si es una ruta protegida y no hay sesión, redirige a login
   if (isProtectedRoute && !sessionToken) {
@@ -29,9 +32,9 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Si es una ruta pública (login/signup) y hay sesión, redirige a home
+  // Si es una ruta pública (login/signup) y hay sesión, redirige a dashboard
   if (isPublicRoute && sessionToken) {
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   return NextResponse.next();
