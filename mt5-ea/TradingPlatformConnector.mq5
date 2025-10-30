@@ -185,7 +185,7 @@ bool SendRecentClosedTrades(int days = 1)
                // Enviar este trade cerrado
                if(closedCount > 0) closedPositions += ",";
                
-               string tradeJson = GetClosedTradeJSON(positionId);
+               string tradeJson = GetHistoricalTradeJSON(positionId);
                if(StringLen(tradeJson) > 0)
                {
                   closedPositions += tradeJson;
