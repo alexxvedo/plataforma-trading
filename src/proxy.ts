@@ -21,6 +21,7 @@ export async function proxy(request: NextRequest) {
 
   // Obtén el token de sesión de las cookies - Better Auth puede usar diferentes nombres
   const sessionToken = 
+    request.cookies.get("__Secure-better-auth.session_token")?.value ||
     request.cookies.get("better-auth.session_token")?.value ||
     request.cookies.get("session_token")?.value ||
     request.cookies.get("better-auth_session")?.value;
