@@ -104,14 +104,108 @@ void OnTimer()
 }
 
 //+------------------------------------------------------------------+
-//| Trade function (detecta nuevas operaciones)                       |
+//| Trade function (detecta nuevas operaciones y cierres)             |
 //+------------------------------------------------------------------+
 void OnTrade()
 {
    if(!isInitialized) return;
    
-   Print("Evento de trade detectado - Actualizando posiciones...");
+   Print("Evento de trade detectado - Actualizando datos...");
+   
+   // Sincronizar posiciones abiertas
    SyncPositions();
+   
+   // Enviar operaciones cerradas recientes (último día)
+   // Esto captura los cierres de operaciones
+   SendRecentClosedTrades(1);
+   
+   // Actualizar snapshot de la cuenta
+   SendAccountSnapshot();
+}
+
+//+------------------------------------------------------------------+
+//| Enviar operaciones cerradas recientes                             |
+//+------------------------------------------------------------------+
+bool SendRecentClosedTrades(int days = 1)
+{
+   datetime from = TimeCurrent() - (days * 86400); // 86400 = segundos en un día
+   datetime to = TimeCurrent();
+   
+   if(!HistorySelect(from, to))
+   {
+      Print("No se pudo seleccionar el historial");
+      return false;
+   }
+   
+   int totalDeals = HistoryDealsTotal();
+   
+   if(totalDeals == 0)
+   {
+      Print("No hay deals en el historial reciente");
+      return true;
+   }
+   
+   // Recopilar posiciones cerradas únicas
+   string closedPositions = "";
+   int closedCount = 0;
+   
+   // Usar un array para trackear posiciones ya procesadas
+   ulong processedPositions[];
+   ArrayResize(processedPositions, 0);
+   
+   for(int i = 0; i < totalDeals; i++)
+   {
+      ulong dealTicket = HistoryDealGetTicket(i);
+      
+      if(dealTicket > 0)
+      {
+         long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+         ulong positionId = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+         
+         // Solo procesar deals de salida (cierres)
+         if(dealEntry == DEAL_ENTRY_OUT && positionId > 0)
+         {
+            // Verificar si ya procesamos esta posición
+            bool alreadyProcessed = false;
+            for(int j = 0; j < ArraySize(processedPositions); j++)
+            {
+               if(processedPositions[j] == positionId)
+               {
+                  alreadyProcessed = true;
+                  break;
+               }
+            }
+            
+            if(!alreadyProcessed)
+            {
+               // Agregar a la lista de procesadas
+               ArrayResize(processedPositions, ArraySize(processedPositions) + 1);
+               processedPositions[ArraySize(processedPositions) - 1] = positionId;
+               
+               // Enviar este trade cerrado
+               if(closedCount > 0) closedPositions += ",";
+               
+               string tradeJson = GetClosedTradeJSON(positionId);
+               if(StringLen(tradeJson) > 0)
+               {
+                  closedPositions += tradeJson;
+                  closedCount++;
+               }
+            }
+         }
+      }
+   }
+   
+   if(closedCount > 0)
+   {
+      string url = API_URL + "/syncHistory?batch=1";
+      string json = "{\"0\":{\"trades\":[" + closedPositions + "],\"replaceAll\":false}}";
+      
+      Print("Enviando ", closedCount, " operaciones cerradas recientes");
+      return SendRequest(url, json);
+   }
+   
+   return true;
 }
 
 //+------------------------------------------------------------------+
