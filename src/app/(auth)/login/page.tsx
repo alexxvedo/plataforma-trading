@@ -35,6 +35,7 @@ export default function LoginPage() {
       const result = await signIn.email({
         email,
         password,
+        callbackURL: "/dashboard",
       });
 
       if (result.error) {
@@ -43,10 +44,14 @@ export default function LoginPage() {
         return;
       }
 
-      // Redirect to dashboard on success
-      router.push("/dashboard");
-      router.refresh();
+      // Si llegamos aquí, el login fue exitoso
+      // Better Auth maneja la redirección automáticamente con callbackURL
+      // Pero por si acaso, forzamos la navegación
+      if (result.data) {
+        window.location.href = "/dashboard";
+      }
     } catch (err) {
+      console.error("Login error:", err);
       setError("Ocurrió un error inesperado. Por favor, intenta de nuevo.");
       setIsLoading(false);
     }

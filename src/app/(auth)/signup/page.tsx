@@ -54,6 +54,7 @@ export default function SignupPage() {
         email,
         password,
         name,
+        callbackURL: "/dashboard",
       });
 
       if (result.error) {
@@ -66,12 +67,12 @@ export default function SignupPage() {
       setSuccess(true);
       setIsLoading(false);
 
-      // Redirect to login or dashboard after a brief delay
+      // Redirect to dashboard after showing success message
       setTimeout(() => {
-        router.push("/dashboard");
-        router.refresh();
+        window.location.href = "/dashboard";
       }, 1500);
     } catch (err) {
+      console.error("Signup error:", err);
       setError("Ocurrió un error inesperado. Por favor, intenta de nuevo.");
       setIsLoading(false);
     }
