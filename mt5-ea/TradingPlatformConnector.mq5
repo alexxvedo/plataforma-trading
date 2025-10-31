@@ -11,14 +11,27 @@
 // Input parameters
 input string API_URL = "https://plataforma-trading.vercel.app/api/ea";  // URL de tu API
 input string API_KEY = "";                                 // API Key de tu cuenta
-input int    UPDATE_INTERVAL = 5;                         // Intervalo de actualización en segundos
+input int    UPDATE_INTERVAL_ACTIVE = 5;                  // Intervalo cuando usuario está en web (segundos)
+input int    UPDATE_INTERVAL_IDLE = 1800;                 // Intervalo cuando usuario NO está en web (30 min)
 input bool   SEND_HISTORY = true;                         // Enviar historial al inicio
 input int    HISTORY_DAYS = 30;                           // Días de historial a enviar
+input bool   OPTIMIZE_BANDWIDTH = true;                   // Optimizar uso de datos (solo enviar si hay cambios)
+input double MIN_BALANCE_CHANGE = 0.01;                   // Cambio mínimo de balance para enviar (%)
 
 // Global variables
 datetime lastUpdate = 0;
 bool isInitialized = false;
 string sessionId = "";
+bool isUserActive = false;                   // Si hay usuario viendo la web
+datetime lastUserActivityCheck = 0;          // Última vez que verificamos actividad
+int currentUpdateInterval = 5;               // Intervalo actual (dinámico)
+
+// Cache para detectar cambios (optimización)
+double lastBalance = 0;
+double lastEquity = 0;
+double lastProfit = 0;
+int lastPositionsCount = 0;
+string lastPositionsHash = "";
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                     |
@@ -42,7 +55,11 @@ int OnInit()
    }
    
    Print("API URL: ", API_URL);
-   Print("Intervalo de actualización: ", UPDATE_INTERVAL, " segundos");
+   Print("Intervalo cuando usuario activo: ", UPDATE_INTERVAL_ACTIVE, " segundos");
+   Print("Intervalo cuando usuario inactivo: ", UPDATE_INTERVAL_IDLE, " segundos");
+   
+   // Inicializar con intervalo activo
+   currentUpdateInterval = UPDATE_INTERVAL_ACTIVE;
    
    // Test de conexión
    if(!TestConnection())
@@ -68,7 +85,7 @@ int OnInit()
       SyncPositions();
    }
    
-   EventSetTimer(UPDATE_INTERVAL);
+   EventSetTimer(currentUpdateInterval);
    
    return(INIT_SUCCEEDED);
 }
@@ -83,7 +100,7 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Timer function                                                     |
+//| Timer function (optimizado para ahorrar bandwidth)                |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
@@ -98,9 +115,58 @@ void OnTimer()
       return;
    }
    
-   // Enviar datos en tiempo real
-   SendAccountSnapshot();
-   UpdatePositions();
+   // Verificar actividad del usuario cada minuto
+   if(TimeCurrent() - lastUserActivityCheck >= 60)
+   {
+      CheckUserActivity();
+      lastUserActivityCheck = TimeCurrent();
+      
+      // Ajustar intervalo del timer si cambió el estado
+      int newInterval = isUserActive ? UPDATE_INTERVAL_ACTIVE : UPDATE_INTERVAL_IDLE;
+      if(newInterval != currentUpdateInterval)
+      {
+         currentUpdateInterval = newInterval;
+         EventKillTimer();
+         EventSetTimer(currentUpdateInterval);
+         Print("Intervalo actualizado a: ", currentUpdateInterval, " segundos (Usuario ", 
+               (isUserActive ? "ACTIVO" : "INACTIVO"), ")");
+      }
+   }
+   
+   // Decidir si enviar datos
+   bool shouldSend = false;
+   
+   if(isUserActive)
+   {
+      // Usuario activo: enviar solo si hay cambios (optimizado)
+      if(OPTIMIZE_BANDWIDTH)
+      {
+         if(HasSignificantChanges())
+         {
+            shouldSend = true;
+         }
+      }
+      else
+      {
+         shouldSend = true;
+      }
+   }
+   else
+   {
+      // Usuario inactivo: enviar siempre (cada 30 min para actualizar BD)
+      shouldSend = true;
+   }
+   
+   if(shouldSend)
+   {
+      if(!isUserActive)
+      {
+         Print("Actualización periódica (usuario inactivo)");
+      }
+      SendAccountSnapshot();
+      UpdatePositions();
+      UpdateCache();
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -660,6 +726,164 @@ bool SendRequest(string url, string jsonData)
       string response = CharArrayToString(result);
       Print("ERROR HTTP ", res, " en ", url, ": ", response);
       return false;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Detectar si hay cambios significativos (optimización)             |
+//+------------------------------------------------------------------+
+bool HasSignificantChanges()
+{
+   double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double currentProfit = AccountInfoDouble(ACCOUNT_PROFIT);
+   int currentPositionsCount = PositionsTotal();
+   
+   // Calcular hash de posiciones actuales
+   string currentPositionsHash = GetPositionsHash();
+   
+   // Verificar si el número de posiciones cambió
+   if(currentPositionsCount != lastPositionsCount)
+   {
+      return true;
+   }
+   
+   // Verificar si las posiciones cambiaron (diferentes tickets o precios)
+   if(currentPositionsHash != lastPositionsHash && currentPositionsCount > 0)
+   {
+      return true;
+   }
+   
+   // Verificar cambio significativo en balance (porcentaje)
+   if(lastBalance > 0)
+   {
+      double balanceChange = MathAbs(currentBalance - lastBalance) / lastBalance * 100;
+      if(balanceChange >= MIN_BALANCE_CHANGE)
+      {
+         return true;
+      }
+   }
+   
+   // Verificar cambio significativo en equity (porcentaje)
+   if(lastEquity > 0)
+   {
+      double equityChange = MathAbs(currentEquity - lastEquity) / lastEquity * 100;
+      if(equityChange >= MIN_BALANCE_CHANGE)
+      {
+         return true;
+      }
+   }
+   
+   // Verificar cambio en profit (si hay posiciones abiertas)
+   if(currentPositionsCount > 0)
+   {
+      double profitChange = MathAbs(currentProfit - lastProfit);
+      // Enviar si el cambio es mayor a 1 unidad de moneda
+      if(profitChange >= 1.0)
+      {
+         return true;
+      }
+   }
+   
+   // No hay cambios significativos
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Actualizar cache de valores (optimización)                        |
+//+------------------------------------------------------------------+
+void UpdateCache()
+{
+   lastBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   lastEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+   lastProfit = AccountInfoDouble(ACCOUNT_PROFIT);
+   lastPositionsCount = PositionsTotal();
+   lastPositionsHash = GetPositionsHash();
+}
+
+//+------------------------------------------------------------------+
+//| Generar hash de posiciones para detectar cambios                  |
+//+------------------------------------------------------------------+
+string GetPositionsHash()
+{
+   string hash = "";
+   int total = PositionsTotal();
+   
+   for(int i = 0; i < total; i++)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket > 0)
+      {
+         double price = PositionGetDouble(POSITION_PRICE_CURRENT);
+         double profit = PositionGetDouble(POSITION_PROFIT);
+         
+         // Crear hash simple: ticket + precio redondeado
+         hash += IntegerToString(ticket) + ":" + 
+                 DoubleToString(price, 2) + ":" + 
+                 DoubleToString(profit, 2) + "|";
+      }
+   }
+   
+   return hash;
+}
+
+//+------------------------------------------------------------------+
+//| Verificar si hay usuarios activos viendo la web                   |
+//+------------------------------------------------------------------+
+void CheckUserActivity()
+{
+   string url = API_URL + "/checkActivity?batch=1";
+   string headers = "Authorization: Bearer " + API_KEY + "\r\n";
+   headers += "Content-Type: application/json\r\n";
+   
+   string jsonData = "{\"0\":{}}";
+   
+   char data[];
+   char result[];
+   string resultHeaders;
+   
+   StringToCharArray(jsonData, data, 0, WHOLE_ARRAY, CP_UTF8);
+   ArrayResize(data, ArraySize(data) - 1);
+   
+   int timeout = 5000;
+   
+   int res = WebRequest(
+      "POST",
+      url,
+      headers,
+      timeout,
+      data,
+      result,
+      resultHeaders
+   );
+   
+   if(res == 200)
+   {
+      string response = CharArrayToString(result);
+      
+      // Parse simple response: buscar "isActive":true
+      if(StringFind(response, "\"isActive\":true") >= 0 || 
+         StringFind(response, "\"isActive\": true") >= 0)
+      {
+         if(!isUserActive)
+         {
+            Print("✓ Usuario ACTIVO detectado en la web");
+         }
+         isUserActive = true;
+      }
+      else
+      {
+         if(isUserActive)
+         {
+            Print("⚠ Usuario ya NO está en la web - reduciendo frecuencia");
+         }
+         isUserActive = false;
+      }
+   }
+   else
+   {
+      // Si falla la petición, asumir que no hay usuario activo
+      isUserActive = false;
    }
 }
 //+------------------------------------------------------------------+

@@ -118,6 +118,32 @@ export const eaRouter = t.router({
     };
   }),
 
+  // Check if there are active users viewing this account
+  checkActivity: eaProcedure.mutation(async ({ ctx }) => {
+    const { tradingAccount } = ctx;
+    
+    // Check if user has recent session activity (last 5 minutes)
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    
+    const activeSessions = await prisma.session.count({
+      where: {
+        userId: tradingAccount.userId,
+        expiresAt: {
+          gt: new Date(), // Session not expired
+        },
+        updatedAt: {
+          gt: fiveMinutesAgo, // Activity in last 5 minutes
+        },
+      },
+    });
+    
+    return {
+      success: true,
+      isActive: activeSessions > 0,
+      accountId: tradingAccount.id,
+    };
+  }),
+
   // Send account snapshot
   sendSnapshot: eaProcedure
     .input(accountSnapshotSchema)
