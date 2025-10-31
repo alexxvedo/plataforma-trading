@@ -219,32 +219,29 @@ export const tradingAccountRouter = createTRPCRouter({
     }),
 
   // Send heartbeat to notify EA that user is actively viewing
+  // OPTIMIZED: Single updateMany query instead of findFirst + update (saves ~1 RU per heartbeat)
   sendHeartbeat: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const { userId } = ctx;
 
-      // Verify ownership
-      const account = await prisma.tradingAccount.findFirst({
+      // Update lastSync directly and verify ownership in one query
+      // This saves 1 RU per heartbeat by avoiding the findFirst check
+      const now = new Date();
+      const updated = await prisma.tradingAccount.updateMany({
         where: {
           id: input.id,
-          userId,
+          userId, // Verify ownership in the same query
         },
+        data: { lastSync: now },
       });
 
-      if (!account) {
+      if (updated.count === 0) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Trading account not found",
         });
       }
-
-      // Update lastSync to indicate user is actively viewing
-      const now = new Date();
-      await prisma.tradingAccount.update({
-        where: { id: input.id },
-        data: { lastSync: now },
-      });
 
       console.log(`[HEARTBEAT] User ${userId.substring(0, 8)}... → Account ${input.id.substring(0, 8)}... at ${now.toISOString()}`);
 

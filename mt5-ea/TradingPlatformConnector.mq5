@@ -117,10 +117,40 @@ void OnTimer()
       return;
    }
    
-   // SIEMPRE verificar estado del usuario (cada CHECK_STATUS_INTERVAL segundos)
-   // Frontend envía heartbeat cada 30s, consideramos activo si < 120s (2 minutos)
+   // Verificar estado del usuario de forma inteligente:
+   // - Si usuario está ACTIVO: lastHeartbeatSeconds se actualiza en cada sendSnapshot/syncPositions/updatePosition
+   //   Solo verificamos si se desconectó (no hacemos ping adicional, ahorra RU)
+   // - Si usuario está INACTIVO: Hacer ping cada CHECK_STATUS_INTERVAL para detectar reconexiones
    bool wasActive = isUserActive;
-   isUserActive = (lastHeartbeatSeconds < 120);
+   
+   static int consecutiveFailures = 0;
+   
+   if(isUserActive)
+   {
+      // Usuario activo: verificar si se desconectó basándose en lastHeartbeatSeconds
+      // (que se actualiza en cada respuesta de sendSnapshot/syncPositions/updatePosition)
+      // No hacemos ping adicional para ahorrar RU
+      isUserActive = (lastHeartbeatSeconds < 120);
+      consecutiveFailures = 0; // Reset contador si todo OK
+   }
+   else
+   {
+      // Usuario inactivo: hacer ping para verificar si se reconectó
+      if(TestConnection(false))
+      {
+         consecutiveFailures = 0;
+         // Actualizar estado basado en el ping
+         isUserActive = (lastHeartbeatSeconds < 120);
+      }
+      else
+      {
+         consecutiveFailures++;
+         if(consecutiveFailures >= 3)
+         {
+            Print("⚠️ ADVERTENCIA: No se pudo verificar estado del usuario después de ", consecutiveFailures, " intentos");
+         }
+      }
+   }
    
    // Detectar cambio de estado
    if(wasActive != isUserActive)
@@ -290,7 +320,7 @@ bool SendRecentClosedTrades(int days = 1)
 //+------------------------------------------------------------------+
 //| Test de conexión con el servidor                                  |
 //+------------------------------------------------------------------+
-bool TestConnection()
+bool TestConnection(bool verbose = true)
 {
    // tRPC usa el formato: /api/ea/ping?batch=1
    string url = API_URL + "/ping?batch=1";
@@ -322,7 +352,7 @@ bool TestConnection()
    if(res == 200)
    {
       string response = CharArrayToString(result);
-      Print("Ping response: ", response);
+      if(verbose) Print("Ping response: ", response);
       
       // Parse lastHeartbeatSeconds from ping response
       // Find the start of the value (after the colon)
@@ -348,8 +378,11 @@ bool TestConnection()
             if(initialHeartbeat >= 0 && initialHeartbeat < 999999)
             {
                lastHeartbeatSeconds = initialHeartbeat;
-               Print("   → Estado inicial: ", (initialHeartbeat < 120 ? "Usuario ACTIVO" : "Usuario INACTIVO"), 
-                     " (", initialHeartbeat, "s desde último heartbeat)");
+               if(verbose)
+               {
+                  Print("   → Estado inicial: ", (initialHeartbeat < 120 ? "Usuario ACTIVO" : "Usuario INACTIVO"), 
+                        " (", initialHeartbeat, "s desde último heartbeat)");
+               }
             }
          }
       }
