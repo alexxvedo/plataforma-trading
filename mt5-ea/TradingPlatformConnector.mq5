@@ -329,13 +329,20 @@ bool TestConnection()
          int endPos = StringFind(substr, ",");
          if(endPos < 0) endPos = StringFind(substr, "}");
          
+         Print("   [DEBUG] substr: '", substr, "'");
+         Print("   [DEBUG] endPos: ", endPos);
+         
          if(endPos > 0)
          {
             string valueStr = StringSubstr(substr, 0, endPos);
+            Print("   [DEBUG] valueStr antes trim: '", valueStr, "'");
             StringTrimLeft(valueStr);
             StringTrimRight(valueStr);
+            Print("   [DEBUG] valueStr después trim: '", valueStr, "'");
             
             int initialHeartbeat = (int)StringToInteger(valueStr);
+            Print("   [DEBUG] initialHeartbeat parseado: ", initialHeartbeat);
+            
             if(initialHeartbeat >= 0 && initialHeartbeat < 999999)
             {
                lastHeartbeatSeconds = initialHeartbeat;
@@ -343,6 +350,10 @@ bool TestConnection()
                      " (", initialHeartbeat, "s desde último heartbeat)");
             }
          }
+      }
+      else
+      {
+         Print("   [DEBUG] No se encontró 'lastHeartbeatSeconds' en la respuesta");
       }
       
       return true;
