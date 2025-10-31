@@ -164,12 +164,21 @@ export const eaRouter = t.router({
       });
 
       // Update last sync time
-      await prisma.tradingAccount.update({
+      const updatedAccount = await prisma.tradingAccount.update({
         where: { id: tradingAccount.id },
         data: { lastSync: new Date() },
       });
 
-      return { success: true, snapshotId: snapshot.id };
+      // Calculate seconds since last heartbeat from frontend
+      const lastHeartbeatSeconds = updatedAccount.lastSync 
+        ? Math.floor((Date.now() - updatedAccount.lastSync.getTime()) / 1000)
+        : 999999; // Very large number if never synced
+
+      return { 
+        success: true, 
+        snapshotId: snapshot.id,
+        lastHeartbeatSeconds, // EA usa esto para saber si hay usuario activo
+      };
     }),
 
   // Sync all open positions (replaces all current positions)
@@ -209,7 +218,21 @@ export const eaRouter = t.router({
         }
       });
 
-      return { success: true, positionsCount: input.positions.length };
+      // Get last heartbeat time
+      const account = await prisma.tradingAccount.findUnique({
+        where: { id: tradingAccount.id },
+        select: { lastSync: true },
+      });
+
+      const lastHeartbeatSeconds = account?.lastSync
+        ? Math.floor((Date.now() - account.lastSync.getTime()) / 1000)
+        : 999999;
+
+      return { 
+        success: true, 
+        positionsCount: input.positions.length,
+        lastHeartbeatSeconds,
+      };
     }),
 
   // Update a single position (for real-time updates)
@@ -252,7 +275,21 @@ export const eaRouter = t.router({
         },
       });
 
-      return { success: true, positionId: position.id };
+      // Get last heartbeat time
+      const account = await prisma.tradingAccount.findUnique({
+        where: { id: tradingAccount.id },
+        select: { lastSync: true },
+      });
+
+      const lastHeartbeatSeconds = account?.lastSync
+        ? Math.floor((Date.now() - account.lastSync.getTime()) / 1000)
+        : 999999;
+
+      return { 
+        success: true, 
+        positionId: position.id,
+        lastHeartbeatSeconds,
+      };
     }),
 
   // Close position (move to history)

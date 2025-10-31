@@ -23,7 +23,7 @@ datetime lastUpdate = 0;
 bool isInitialized = false;
 string sessionId = "";
 bool isUserActive = false;                   // Si hay usuario viendo la web
-datetime lastUserActivityCheck = 0;          // Última vez que verificamos actividad
+int lastHeartbeatSeconds = 999999;           // Segundos desde último heartbeat del frontend
 int currentUpdateInterval = 5;               // Intervalo actual (dinámico)
 
 // Cache para detectar cambios (optimización)
@@ -115,21 +115,31 @@ void OnTimer()
       return;
    }
    
-   // Verificar actividad del usuario cada minuto
-   if(TimeCurrent() - lastUserActivityCheck >= 60)
+   // Determinar si el usuario está activo basándose en el último heartbeat
+   // Frontend envía heartbeat cada 30s, consideramos activo si < 120s (2 minutos)
+   bool wasActive = isUserActive;
+   isUserActive = (lastHeartbeatSeconds < 120);
+   
+   // Detectar cambio de estado
+   if(wasActive != isUserActive)
    {
-      CheckUserActivity();
-      lastUserActivityCheck = TimeCurrent();
+      if(isUserActive)
+      {
+         Print("✅ Usuario CONECTADO - Activando modo tiempo real");
+      }
+      else
+      {
+         Print("⚠️ Usuario DESCONECTADO (", lastHeartbeatSeconds, "s sin heartbeat) - Reduciendo frecuencia");
+      }
       
-      // Ajustar intervalo del timer si cambió el estado
+      // Ajustar intervalo del timer
       int newInterval = isUserActive ? UPDATE_INTERVAL_ACTIVE : UPDATE_INTERVAL_IDLE;
       if(newInterval != currentUpdateInterval)
       {
          currentUpdateInterval = newInterval;
          EventKillTimer();
          EventSetTimer(currentUpdateInterval);
-         Print("Intervalo actualizado a: ", currentUpdateInterval, " segundos (Usuario ", 
-               (isUserActive ? "ACTIVO" : "INACTIVO"), ")");
+         Print("   → Intervalo actualizado a: ", currentUpdateInterval, " segundos");
       }
    }
    
@@ -161,7 +171,7 @@ void OnTimer()
    {
       if(!isUserActive)
       {
-         Print("Actualización periódica (usuario inactivo)");
+         Print("📊 Actualización periódica (usuario inactivo - ", lastHeartbeatSeconds, "s sin heartbeat)");
       }
       SendAccountSnapshot();
       UpdatePositions();
@@ -712,7 +722,36 @@ bool SendRequest(string url, string jsonData)
    
    if(res == 200)
    {
-      // Success
+      // Parse response to extract lastHeartbeatSeconds
+      string response = CharArrayToString(result);
+      
+      // Buscar "lastHeartbeatSeconds": en la respuesta
+      int pos = StringFind(response, "\"lastHeartbeatSeconds\":");
+      if(pos >= 0)
+      {
+         // Extraer el número después de los dos puntos
+         string substr = StringSubstr(response, pos + 24); // 24 = longitud de "lastHeartbeatSeconds":
+         
+         // Encontrar el siguiente delimitador (coma o llave)
+         int endPos = StringFind(substr, ",");
+         if(endPos < 0) endPos = StringFind(substr, "}");
+         
+         if(endPos > 0)
+         {
+            string valueStr = StringSubstr(substr, 0, endPos);
+            StringTrimLeft(valueStr);
+            StringTrimRight(valueStr);
+            
+            int newHeartbeatSeconds = (int)StringToInteger(valueStr);
+            
+            // Solo actualizar si es un valor válido
+            if(newHeartbeatSeconds >= 0 && newHeartbeatSeconds < 999999)
+            {
+               lastHeartbeatSeconds = newHeartbeatSeconds;
+            }
+         }
+      }
+      
       return true;
    }
    else if(res == -1)
@@ -827,110 +866,5 @@ string GetPositionsHash()
    return hash;
 }
 
-//+------------------------------------------------------------------+
-//| Verificar si hay usuarios activos viendo la web                   |
-//+------------------------------------------------------------------+
-void CheckUserActivity()
-{
-   Print("🔍 Verificando actividad del usuario...");
-   
-   string url = API_URL + "/checkActivity?batch=1";
-   string headers = "Authorization: Bearer " + API_KEY + "\r\n";
-   headers += "Content-Type: application/json\r\n";
-   
-   string jsonData = "{\"0\":{}}";
-   
-   char data[];
-   char result[];
-   string resultHeaders;
-   
-   StringToCharArray(jsonData, data, 0, WHOLE_ARRAY, CP_UTF8);
-   ArrayResize(data, ArraySize(data) - 1);
-   
-   int timeout = 5000;
-   
-   Print("   → Enviando petición a: ", url);
-   
-   int res = WebRequest(
-      "POST",
-      url,
-      headers,
-      timeout,
-      data,
-      result,
-      resultHeaders
-   );
-   
-   Print("   → Código respuesta HTTP: ", res);
-   
-   if(res == 200)
-   {
-      string response = CharArrayToString(result);
-      Print("   → Respuesta recibida (", StringLen(response), " chars)");
-      
-      // Debug: mostrar respuesta completa las primeras veces
-      if(lastUserActivityCheck < 180) // Primeros 3 minutos
-      {
-         Print("   → Contenido: ", StringSubstr(response, 0, 200), "...");
-      }
-      
-      // Parse response - buscar "isActive":true o "isActive":false
-      // La respuesta viene en formato tRPC: [{"result":{"data":{"isActive":true,"success":true,...}}}]
-      if(StringFind(response, "\"isActive\":true") >= 0 || 
-         StringFind(response, "\"isActive\": true") >= 0)
-      {
-         Print("   → Estado parseado: ACTIVO");
-         if(!isUserActive)
-         {
-            Print("✅ CAMBIO DE ESTADO: Usuario ACTIVO detectado - modo tiempo real");
-         }
-         else
-         {
-            Print("   ℹ Estado sin cambios: Usuario sigue ACTIVO");
-         }
-         isUserActive = true;
-      }
-      else if(StringFind(response, "\"isActive\":false") >= 0 || 
-              StringFind(response, "\"isActive\": false") >= 0)
-      {
-         Print("   → Estado parseado: INACTIVO");
-         if(isUserActive)
-         {
-            Print("⚠️ CAMBIO DE ESTADO: Usuario ya NO está en la web - reduciendo frecuencia");
-         }
-         else
-         {
-            Print("   ℹ Estado sin cambios: Usuario sigue INACTIVO");
-         }
-         isUserActive = false;
-      }
-      else
-      {
-         // Si no se puede parsear, asumir inactivo por seguridad
-         Print("   ⚠ ERROR: No se encontró 'isActive' en la respuesta");
-         if(isUserActive)
-         {
-            Print("⚠️ No se pudo parsear estado - asumiendo INACTIVO por seguridad");
-         }
-         isUserActive = false;
-      }
-   }
-   else if(res == 0)
-   {
-      // Error silencioso - muy común cuando WebRequest no está habilitado
-      Print("   ❌ ERROR: WebRequest falló (código 0)");
-      Print("   💡 Verifica que la URL esté en 'Herramientas > Opciones > Expert Advisors > WebRequest'");
-      isUserActive = false;
-   }
-   else
-   {
-      // Error HTTP
-      Print("   ❌ ERROR HTTP ", res, " al verificar actividad");
-      isUserActive = false;
-   }
-   
-   Print("   ✓ Estado final: Usuario ", (isUserActive ? "ACTIVO" : "INACTIVO"));
-}
-//+------------------------------------------------------------------+
 
 
