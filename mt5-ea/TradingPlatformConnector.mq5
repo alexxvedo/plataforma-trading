@@ -832,6 +832,8 @@ string GetPositionsHash()
 //+------------------------------------------------------------------+
 void CheckUserActivity()
 {
+   Print("🔍 Verificando actividad del usuario...");
+   
    string url = API_URL + "/checkActivity?batch=1";
    string headers = "Authorization: Bearer " + API_KEY + "\r\n";
    headers += "Content-Type: application/json\r\n";
@@ -847,6 +849,8 @@ void CheckUserActivity()
    
    int timeout = 5000;
    
+   Print("   → Enviando petición a: ", url);
+   
    int res = WebRequest(
       "POST",
       url,
@@ -857,14 +861,17 @@ void CheckUserActivity()
       resultHeaders
    );
    
+   Print("   → Código respuesta HTTP: ", res);
+   
    if(res == 200)
    {
       string response = CharArrayToString(result);
+      Print("   → Respuesta recibida (", StringLen(response), " chars)");
       
-      // Debug: mostrar respuesta (solo primera vez)
-      if(lastUserActivityCheck == 0)
+      // Debug: mostrar respuesta completa las primeras veces
+      if(lastUserActivityCheck < 180) // Primeros 3 minutos
       {
-         Print("Respuesta checkActivity: ", response);
+         Print("   → Contenido: ", StringSubstr(response, 0, 200), "...");
       }
       
       // Parse response - buscar "isActive":true o "isActive":false
@@ -872,40 +879,57 @@ void CheckUserActivity()
       if(StringFind(response, "\"isActive\":true") >= 0 || 
          StringFind(response, "\"isActive\": true") >= 0)
       {
+         Print("   → Estado parseado: ACTIVO");
          if(!isUserActive)
          {
-            Print("✓ Usuario ACTIVO detectado en la web - modo tiempo real");
+            Print("✅ CAMBIO DE ESTADO: Usuario ACTIVO detectado - modo tiempo real");
+         }
+         else
+         {
+            Print("   ℹ Estado sin cambios: Usuario sigue ACTIVO");
          }
          isUserActive = true;
       }
       else if(StringFind(response, "\"isActive\":false") >= 0 || 
               StringFind(response, "\"isActive\": false") >= 0)
       {
+         Print("   → Estado parseado: INACTIVO");
          if(isUserActive)
          {
-            Print("⚠ Usuario ya NO está en la web - reduciendo frecuencia");
+            Print("⚠️ CAMBIO DE ESTADO: Usuario ya NO está en la web - reduciendo frecuencia");
+         }
+         else
+         {
+            Print("   ℹ Estado sin cambios: Usuario sigue INACTIVO");
          }
          isUserActive = false;
       }
       else
       {
          // Si no se puede parsear, asumir inactivo por seguridad
+         Print("   ⚠ ERROR: No se encontró 'isActive' en la respuesta");
          if(isUserActive)
          {
-            Print("⚠ No se pudo parsear estado - asumiendo inactivo");
+            Print("⚠️ No se pudo parsear estado - asumiendo INACTIVO por seguridad");
          }
          isUserActive = false;
       }
    }
-   else
+   else if(res == 0)
    {
-      // Si falla la petición, asumir que no hay usuario activo
-      if(res != 0)
-      {
-         Print("⚠ Error al verificar actividad (HTTP ", res, ") - asumiendo inactivo");
-      }
+      // Error silencioso - muy común cuando WebRequest no está habilitado
+      Print("   ❌ ERROR: WebRequest falló (código 0)");
+      Print("   💡 Verifica que la URL esté en 'Herramientas > Opciones > Expert Advisors > WebRequest'");
       isUserActive = false;
    }
+   else
+   {
+      // Error HTTP
+      Print("   ❌ ERROR HTTP ", res, " al verificar actividad");
+      isUserActive = false;
+   }
+   
+   Print("   ✓ Estado final: Usuario ", (isUserActive ? "ACTIVO" : "INACTIVO"));
 }
 //+------------------------------------------------------------------+
 
