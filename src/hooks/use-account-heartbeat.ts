@@ -81,6 +81,12 @@ export function useAllAccountsHeartbeat() {
 
     // Function to send heartbeat to all accounts
     const doSendHeartbeatToAll = async () => {
+      // Only send heartbeat if page is visible (not in background tab)
+      if (typeof document !== 'undefined' && document.hidden) {
+        console.log("⏸️ Página en background - pausando heartbeats");
+        return;
+      }
+
       if (!sendHeartbeat.isPending && accounts && accounts.length > 0) {
         console.log(`💓 Enviando heartbeat a ${accounts.length} cuenta(s)...`);
         
@@ -103,11 +109,28 @@ export function useAllAccountsHeartbeat() {
     // Send heartbeat to all accounts every 30 seconds
     intervalRef.current = setInterval(doSendHeartbeatToAll, 30000);
 
+    // Listen to visibility changes to pause/resume heartbeats
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log("👁️ Página oculta - heartbeats se pausarán automáticamente");
+      } else {
+        console.log("👁️ Página visible - enviando heartbeat inmediato...");
+        doSendHeartbeatToAll();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
     // Cleanup on unmount or accounts change
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
+      }
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

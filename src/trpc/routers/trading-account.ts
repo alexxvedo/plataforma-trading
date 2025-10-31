@@ -240,10 +240,13 @@ export const tradingAccountRouter = createTRPCRouter({
       }
 
       // Update lastSync to indicate user is actively viewing
+      const now = new Date();
       await prisma.tradingAccount.update({
         where: { id: input.id },
-        data: { lastSync: new Date() },
+        data: { lastSync: now },
       });
+
+      console.log(`[HEARTBEAT] User ${userId.substring(0, 8)}... → Account ${input.id.substring(0, 8)}... at ${now.toISOString()}`);
 
       return { success: true };
     }),
