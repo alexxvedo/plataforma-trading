@@ -111,11 +111,11 @@ export const eaRouter = t.router({
   // Heartbeat - EA calls this to confirm connection
   // Changed to mutation so it accepts POST requests from EA
   ping: eaProcedure.mutation(async ({ ctx }) => {
-    const { tradingAccount } = ctx;
+    let { tradingAccount } = ctx;
 
     // Initialize lastSync if null (EA started before user connected)
     if (!tradingAccount.lastSync) {
-      await prisma.tradingAccount.update({
+      tradingAccount = await prisma.tradingAccount.update({
         where: { id: tradingAccount.id },
         data: { lastSync: new Date(0) }, // Unix epoch = very old, so EA knows user is inactive
       });
@@ -125,6 +125,9 @@ export const eaRouter = t.router({
     const lastHeartbeatSeconds = tradingAccount.lastSync 
       ? Math.floor((Date.now() - tradingAccount.lastSync.getTime()) / 1000)
       : 999999;
+
+    // Debug log
+    console.log(`[PING] Account ${tradingAccount.id.substring(0, 8)}... - lastSync: ${tradingAccount.lastSync?.toISOString() || 'null'}, seconds: ${lastHeartbeatSeconds}`);
 
     return {
       success: true,
