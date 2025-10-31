@@ -320,6 +320,31 @@ bool TestConnection()
    {
       string response = CharArrayToString(result);
       Print("Ping response: ", response);
+      
+      // Parse lastHeartbeatSeconds from ping response
+      int pos = StringFind(response, "\"lastHeartbeatSeconds\":");
+      if(pos >= 0)
+      {
+         string substr = StringSubstr(response, pos + 24);
+         int endPos = StringFind(substr, ",");
+         if(endPos < 0) endPos = StringFind(substr, "}");
+         
+         if(endPos > 0)
+         {
+            string valueStr = StringSubstr(substr, 0, endPos);
+            StringTrimLeft(valueStr);
+            StringTrimRight(valueStr);
+            
+            int initialHeartbeat = (int)StringToInteger(valueStr);
+            if(initialHeartbeat >= 0 && initialHeartbeat < 999999)
+            {
+               lastHeartbeatSeconds = initialHeartbeat;
+               Print("   → Estado inicial: ", (initialHeartbeat < 120 ? "Usuario ACTIVO" : "Usuario INACTIVO"), 
+                     " (", initialHeartbeat, "s desde último heartbeat)");
+            }
+         }
+      }
+      
       return true;
    }
    else if(res == -1)

@@ -110,37 +110,30 @@ const tradeHistorySchema = z.object({
 export const eaRouter = t.router({
   // Heartbeat - EA calls this to confirm connection
   // Changed to mutation so it accepts POST requests from EA
-  ping: eaProcedure.mutation(({ ctx }) => {
+  ping: eaProcedure.mutation(async ({ ctx }) => {
+    const { tradingAccount } = ctx;
+
+    // Initialize lastSync if null (EA started before user connected)
+    if (!tradingAccount.lastSync) {
+      await prisma.tradingAccount.update({
+        where: { id: tradingAccount.id },
+        data: { lastSync: new Date(0) }, // Unix epoch = very old, so EA knows user is inactive
+      });
+    }
+
+    // Calculate seconds since last heartbeat
+    const lastHeartbeatSeconds = tradingAccount.lastSync 
+      ? Math.floor((Date.now() - tradingAccount.lastSync.getTime()) / 1000)
+      : 999999;
+
     return {
       success: true,
-      accountId: ctx.tradingAccount.id,
+      accountId: tradingAccount.id,
       timestamp: new Date().toISOString(),
+      lastHeartbeatSeconds, // Tell EA immediately if user is active
     };
   }),
 
-  // Check if there are active users viewing this account (heartbeat-based)
-  checkActivity: eaProcedure.mutation(async ({ ctx }) => {
-    const { tradingAccount } = ctx;
-    
-    // Check if there's a recent heartbeat (last 60 seconds)
-    // Frontend sends heartbeat every 30s, so 60s gives buffer
-    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
-    
-    const account = await prisma.tradingAccount.findUnique({
-      where: { id: tradingAccount.id },
-      select: { lastSync: true },
-    });
-    
-    // If lastSync is recent, it means frontend is actively sending heartbeats
-    const isActive = account?.lastSync && account.lastSync > oneMinuteAgo;
-    
-    return {
-      success: true,
-      isActive: isActive || false,
-      accountId: tradingAccount.id,
-      lastHeartbeat: account?.lastSync?.toISOString(),
-    };
-  }),
 
   // Send account snapshot
   sendSnapshot: eaProcedure
