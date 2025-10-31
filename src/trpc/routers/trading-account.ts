@@ -218,6 +218,36 @@ export const tradingAccountRouter = createTRPCRouter({
       });
     }),
 
+  // Send heartbeat to notify EA that user is actively viewing
+  sendHeartbeat: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { userId } = ctx;
+
+      // Verify ownership
+      const account = await prisma.tradingAccount.findFirst({
+        where: {
+          id: input.id,
+          userId,
+        },
+      });
+
+      if (!account) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Trading account not found",
+        });
+      }
+
+      // Update lastSync to indicate user is actively viewing
+      await prisma.tradingAccount.update({
+        where: { id: input.id },
+        data: { lastSync: new Date() },
+      });
+
+      return { success: true };
+    }),
+
   // Get account statistics
   getAccountStats: protectedProcedure
     .input(z.object({ id: z.string() }))

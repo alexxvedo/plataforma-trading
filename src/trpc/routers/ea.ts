@@ -118,29 +118,27 @@ export const eaRouter = t.router({
     };
   }),
 
-  // Check if there are active users viewing this account
+  // Check if there are active users viewing this account (heartbeat-based)
   checkActivity: eaProcedure.mutation(async ({ ctx }) => {
     const { tradingAccount } = ctx;
     
-    // Check if user has recent session activity (last 5 minutes)
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    // Check if there's a recent heartbeat (last 60 seconds)
+    // Frontend sends heartbeat every 30s, so 60s gives buffer
+    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
     
-    const activeSessions = await prisma.session.count({
-      where: {
-        userId: tradingAccount.userId,
-        expiresAt: {
-          gt: new Date(), // Session not expired
-        },
-        updatedAt: {
-          gt: fiveMinutesAgo, // Activity in last 5 minutes
-        },
-      },
+    const account = await prisma.tradingAccount.findUnique({
+      where: { id: tradingAccount.id },
+      select: { lastSync: true },
     });
+    
+    // If lastSync is recent, it means frontend is actively sending heartbeats
+    const isActive = account?.lastSync && account.lastSync > oneMinuteAgo;
     
     return {
       success: true,
-      isActive: activeSessions > 0,
+      isActive: isActive || false,
       accountId: tradingAccount.id,
+      lastHeartbeat: account?.lastSync?.toISOString(),
     };
   }),
 

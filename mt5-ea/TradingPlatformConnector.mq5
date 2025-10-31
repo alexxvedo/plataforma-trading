@@ -861,17 +861,25 @@ void CheckUserActivity()
    {
       string response = CharArrayToString(result);
       
-      // Parse simple response: buscar "isActive":true
+      // Debug: mostrar respuesta (solo primera vez)
+      if(lastUserActivityCheck == 0)
+      {
+         Print("Respuesta checkActivity: ", response);
+      }
+      
+      // Parse response - buscar "isActive":true o "isActive":false
+      // La respuesta viene en formato tRPC: [{"result":{"data":{"isActive":true,"success":true,...}}}]
       if(StringFind(response, "\"isActive\":true") >= 0 || 
          StringFind(response, "\"isActive\": true") >= 0)
       {
          if(!isUserActive)
          {
-            Print("✓ Usuario ACTIVO detectado en la web");
+            Print("✓ Usuario ACTIVO detectado en la web - modo tiempo real");
          }
          isUserActive = true;
       }
-      else
+      else if(StringFind(response, "\"isActive\":false") >= 0 || 
+              StringFind(response, "\"isActive\": false") >= 0)
       {
          if(isUserActive)
          {
@@ -879,10 +887,23 @@ void CheckUserActivity()
          }
          isUserActive = false;
       }
+      else
+      {
+         // Si no se puede parsear, asumir inactivo por seguridad
+         if(isUserActive)
+         {
+            Print("⚠ No se pudo parsear estado - asumiendo inactivo");
+         }
+         isUserActive = false;
+      }
    }
    else
    {
       // Si falla la petición, asumir que no hay usuario activo
+      if(res != 0)
+      {
+         Print("⚠ Error al verificar actividad (HTTP ", res, ") - asumiendo inactivo");
+      }
       isUserActive = false;
    }
 }
