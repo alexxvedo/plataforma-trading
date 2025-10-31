@@ -13,6 +13,7 @@ input string API_URL = "https://plataforma-trading.vercel.app/api/ea";  // URL d
 input string API_KEY = "";                                 // API Key de tu cuenta
 input int    UPDATE_INTERVAL_ACTIVE = 5;                  // Intervalo cuando usuario está en web (segundos)
 input int    UPDATE_INTERVAL_IDLE = 1800;                 // Intervalo cuando usuario NO está en web (30 min)
+input int    CHECK_STATUS_INTERVAL = 30;                  // Intervalo para verificar estado del usuario (segundos)
 input bool   SEND_HISTORY = true;                         // Enviar historial al inicio
 input int    HISTORY_DAYS = 30;                           // Días de historial a enviar
 input bool   OPTIMIZE_BANDWIDTH = true;                   // Optimizar uso de datos (solo enviar si hay cambios)
@@ -85,7 +86,8 @@ int OnInit()
       SyncPositions();
    }
    
-   EventSetTimer(currentUpdateInterval);
+   // Use fixed interval for checking user status (not dynamic)
+   EventSetTimer(CHECK_STATUS_INTERVAL);
    
    return(INIT_SUCCEEDED);
 }
@@ -115,7 +117,7 @@ void OnTimer()
       return;
    }
    
-   // Determinar si el usuario está activo basándose en el último heartbeat
+   // SIEMPRE verificar estado del usuario (cada CHECK_STATUS_INTERVAL segundos)
    // Frontend envía heartbeat cada 30s, consideramos activo si < 120s (2 minutos)
    bool wasActive = isUserActive;
    isUserActive = (lastHeartbeatSeconds < 120);
@@ -126,45 +128,45 @@ void OnTimer()
       if(isUserActive)
       {
          Print("✅ Usuario CONECTADO - Activando modo tiempo real");
+         lastUpdate = 0; // Reset para enviar inmediatamente
       }
       else
       {
          Print("⚠️ Usuario DESCONECTADO (", lastHeartbeatSeconds, "s sin heartbeat) - Reduciendo frecuencia");
       }
-      
-      // Ajustar intervalo del timer
-      int newInterval = isUserActive ? UPDATE_INTERVAL_ACTIVE : UPDATE_INTERVAL_IDLE;
-      if(newInterval != currentUpdateInterval)
-      {
-         currentUpdateInterval = newInterval;
-         EventKillTimer();
-         EventSetTimer(currentUpdateInterval);
-         Print("   → Intervalo actualizado a: ", currentUpdateInterval, " segundos");
-      }
    }
    
-   // Decidir si enviar datos
+   // Decidir si enviar datos basándose en el tiempo transcurrido
+   datetime now = TimeCurrent();
+   int secondsSinceLastUpdate = (int)(now - lastUpdate);
+   
+   // Determinar intervalo actual según estado del usuario
+   int requiredInterval = isUserActive ? UPDATE_INTERVAL_ACTIVE : UPDATE_INTERVAL_IDLE;
+   
    bool shouldSend = false;
    
-   if(isUserActive)
+   if(secondsSinceLastUpdate >= requiredInterval)
    {
-      // Usuario activo: enviar solo si hay cambios (optimizado)
-      if(OPTIMIZE_BANDWIDTH)
+      if(isUserActive)
       {
-         if(HasSignificantChanges())
+         // Usuario activo: enviar solo si hay cambios (optimizado)
+         if(OPTIMIZE_BANDWIDTH)
+         {
+            if(HasSignificantChanges())
+            {
+               shouldSend = true;
+            }
+         }
+         else
          {
             shouldSend = true;
          }
       }
       else
       {
+         // Usuario inactivo: enviar siempre (cada 30 min para actualizar BD)
          shouldSend = true;
       }
-   }
-   else
-   {
-      // Usuario inactivo: enviar siempre (cada 30 min para actualizar BD)
-      shouldSend = true;
    }
    
    if(shouldSend)
@@ -176,6 +178,7 @@ void OnTimer()
       SendAccountSnapshot();
       UpdatePositions();
       UpdateCache();
+      lastUpdate = now;
    }
 }
 
