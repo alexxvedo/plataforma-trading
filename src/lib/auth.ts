@@ -19,7 +19,7 @@ const getBaseURL = () => {
 export const auth = betterAuth({
   baseURL: getBaseURL(),
   database: prismaAdapter(prisma, {
-    provider: "postgresql", // or "mysql", "postgresql", ...etc
+    provider: "mysql",
   }),
   emailAndPassword: {
     enabled: true,
