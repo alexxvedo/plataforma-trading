@@ -163,15 +163,10 @@ export const eaRouter = t.router({
         },
       });
 
-      // Update last sync time
-      const updatedAccount = await prisma.tradingAccount.update({
-        where: { id: tradingAccount.id },
-        data: { lastSync: new Date() },
-      });
-
       // Calculate seconds since last heartbeat from frontend
-      const lastHeartbeatSeconds = updatedAccount.lastSync 
-        ? Math.floor((Date.now() - updatedAccount.lastSync.getTime()) / 1000)
+      // lastSync is updated by frontend heartbeat (sendHeartbeat mutation)
+      const lastHeartbeatSeconds = tradingAccount.lastSync 
+        ? Math.floor((Date.now() - tradingAccount.lastSync.getTime()) / 1000)
         : 999999; // Very large number if never synced
 
       return { 
@@ -218,14 +213,9 @@ export const eaRouter = t.router({
         }
       });
 
-      // Get last heartbeat time
-      const account = await prisma.tradingAccount.findUnique({
-        where: { id: tradingAccount.id },
-        select: { lastSync: true },
-      });
-
-      const lastHeartbeatSeconds = account?.lastSync
-        ? Math.floor((Date.now() - account.lastSync.getTime()) / 1000)
+      // Calculate seconds since last heartbeat from frontend
+      const lastHeartbeatSeconds = tradingAccount.lastSync
+        ? Math.floor((Date.now() - tradingAccount.lastSync.getTime()) / 1000)
         : 999999;
 
       return { 
@@ -275,14 +265,9 @@ export const eaRouter = t.router({
         },
       });
 
-      // Get last heartbeat time
-      const account = await prisma.tradingAccount.findUnique({
-        where: { id: tradingAccount.id },
-        select: { lastSync: true },
-      });
-
-      const lastHeartbeatSeconds = account?.lastSync
-        ? Math.floor((Date.now() - account.lastSync.getTime()) / 1000)
+      // Calculate seconds since last heartbeat from frontend
+      const lastHeartbeatSeconds = tradingAccount.lastSync
+        ? Math.floor((Date.now() - tradingAccount.lastSync.getTime()) / 1000)
         : 999999;
 
       return { 

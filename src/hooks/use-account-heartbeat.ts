@@ -82,14 +82,26 @@ export function useAllAccountsHeartbeat() {
     // Function to send heartbeat to all accounts
     const doSendHeartbeatToAll = () => {
       if (!sendHeartbeat.isPending && accounts && accounts.length > 0) {
+        console.log(`💓 Enviando heartbeat a ${accounts.length} cuenta(s)...`);
         accounts.forEach((account: { id: string }) => {
           // Send each heartbeat individually (not batched)
-          sendHeartbeat.mutate({ id: account.id });
+          sendHeartbeat.mutate(
+            { id: account.id },
+            {
+              onSuccess: () => {
+                console.log(`✓ Heartbeat enviado a cuenta ${account.id.substring(0, 8)}...`);
+              },
+              onError: (err) => {
+                console.error(`✗ Error enviando heartbeat:`, err);
+              },
+            }
+          );
         });
       }
     };
 
     // Send initial heartbeat immediately
+    console.log("🚀 Iniciando sistema de heartbeat...");
     doSendHeartbeatToAll();
 
     // Send heartbeat to all accounts every 30 seconds
