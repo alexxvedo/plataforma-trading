@@ -2,7 +2,7 @@
 // ^-- to make sure we can mount the Provider from a server component
 import type { QueryClient } from "@tanstack/react-query";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import { createTRPCClient, httpBatchLink, splitLink, httpLink } from "@trpc/client";
 import { createTRPCContext } from "@trpc/tanstack-react-query";
 import { useState } from "react";
 import { makeQueryClient } from "./query-client";
@@ -42,9 +42,16 @@ export function TRPCReactProvider(
   const [trpcClient] = useState(() =>
     createTRPCClient<AppRouter>({
       links: [
-        httpBatchLink({
-          // transformer: superjson, <-- if you use a data transformer
-          url: getUrl(),
+        splitLink({
+          // Disable batching for sendHeartbeat to avoid URI Too Long errors
+          condition: (op) => op.path === 'tradingAccount.sendHeartbeat',
+          true: httpLink({
+            url: getUrl(),
+          }),
+          false: httpBatchLink({
+            url: getUrl(),
+            maxURLLength: 2000, // Limit URL length to prevent 414 errors
+          }),
         }),
       ],
     })

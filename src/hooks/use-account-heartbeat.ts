@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import { useTRPC } from "@/trpc/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
@@ -16,27 +16,29 @@ export function useAccountHeartbeat(accountId: string | undefined | null) {
     ...trpc.tradingAccount.sendHeartbeat.mutationOptions(),
   });
 
-  const sendHeartbeatFn = useCallback(() => {
-    if (accountId) {
-      sendHeartbeat.mutate({ id: accountId });
-    }
-  }, [accountId, sendHeartbeat]);
-
   useEffect(() => {
+    // Clear any existing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
     if (!accountId) {
-      // Clear interval if no account
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
       return;
     }
 
+    // Function to send heartbeat
+    const doSendHeartbeat = () => {
+      if (!sendHeartbeat.isPending) {
+        sendHeartbeat.mutate({ id: accountId });
+      }
+    };
+
     // Send initial heartbeat immediately
-    sendHeartbeatFn();
+    doSendHeartbeat();
 
     // Send heartbeat every 30 seconds
-    intervalRef.current = setInterval(sendHeartbeatFn, 30000); // 30 seconds
+    intervalRef.current = setInterval(doSendHeartbeat, 30000);
 
     // Cleanup on unmount or accountId change
     return () => {
@@ -45,7 +47,8 @@ export function useAccountHeartbeat(accountId: string | undefined | null) {
         intervalRef.current = null;
       }
     };
-  }, [accountId, sendHeartbeatFn]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]); // Only depend on accountId, not the mutation
 
   return null;
 }
@@ -65,29 +68,32 @@ export function useAllAccountsHeartbeat() {
     ...trpc.tradingAccount.sendHeartbeat.mutationOptions(),
   });
 
-  const sendHeartbeatToAll = useCallback(() => {
-    if (accounts && accounts.length > 0) {
-      accounts.forEach((account: { id: string }) => {
-        sendHeartbeat.mutate({ id: account.id });
-      });
-    }
-  }, [accounts, sendHeartbeat]);
-
   useEffect(() => {
+    // Clear any existing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
     if (!accounts || accounts.length === 0) {
-      // Clear interval if no accounts
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
       return;
     }
 
+    // Function to send heartbeat to all accounts
+    const doSendHeartbeatToAll = () => {
+      if (!sendHeartbeat.isPending && accounts && accounts.length > 0) {
+        accounts.forEach((account: { id: string }) => {
+          // Send each heartbeat individually (not batched)
+          sendHeartbeat.mutate({ id: account.id });
+        });
+      }
+    };
+
     // Send initial heartbeat immediately
-    sendHeartbeatToAll();
+    doSendHeartbeatToAll();
 
     // Send heartbeat to all accounts every 30 seconds
-    intervalRef.current = setInterval(sendHeartbeatToAll, 30000); // 30 seconds
+    intervalRef.current = setInterval(doSendHeartbeatToAll, 30000);
 
     // Cleanup on unmount or accounts change
     return () => {
@@ -96,7 +102,8 @@ export function useAllAccountsHeartbeat() {
         intervalRef.current = null;
       }
     };
-  }, [accounts, sendHeartbeatToAll]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts?.length]); // Only depend on accounts length, not the mutation or accounts object
 
   return null;
 }
