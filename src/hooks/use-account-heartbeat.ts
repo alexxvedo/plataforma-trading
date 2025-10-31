@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useTRPC } from "@/trpc/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
@@ -16,6 +16,14 @@ export function useAccountHeartbeat(accountId: string | undefined | null) {
     ...trpc.tradingAccount.sendHeartbeat.mutationOptions(),
   });
 
+  // Memoize the heartbeat function to avoid recreating it on every render
+  const doSendHeartbeat = useCallback(() => {
+    if (!accountId) return;
+    if (!sendHeartbeat.isPending) {
+      sendHeartbeat.mutate({ id: accountId });
+    }
+  }, [accountId, sendHeartbeat]);
+
   useEffect(() => {
     // Clear any existing interval
     if (intervalRef.current) {
@@ -26,13 +34,6 @@ export function useAccountHeartbeat(accountId: string | undefined | null) {
     if (!accountId) {
       return;
     }
-
-    // Function to send heartbeat
-    const doSendHeartbeat = () => {
-      if (!sendHeartbeat.isPending) {
-        sendHeartbeat.mutate({ id: accountId });
-      }
-    };
 
     // Send initial heartbeat immediately
     doSendHeartbeat();
@@ -47,8 +48,7 @@ export function useAccountHeartbeat(accountId: string | undefined | null) {
         intervalRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId]); // Only depend on accountId, not the mutation
+  }, [accountId, doSendHeartbeat]);
 
   return null;
 }
@@ -60,6 +60,7 @@ export function useAccountHeartbeat(accountId: string | undefined | null) {
  */
 export function useAllAccountsHeartbeat() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const hasInitializedRef = useRef(false);
   const trpc = useTRPC();
   const { data: accounts } = useQuery({
     ...trpc.tradingAccount.getMyAccounts.queryOptions(),
@@ -68,6 +69,33 @@ export function useAllAccountsHeartbeat() {
     ...trpc.tradingAccount.sendHeartbeat.mutationOptions(),
   });
 
+  // Function to send heartbeat to all accounts
+  const doSendHeartbeatToAll = useCallback(async () => {
+    // Only send heartbeat if page is visible (not in background tab)
+    if (typeof document !== 'undefined' && document.hidden) {
+      console.log("⏸️ Página en background - pausando heartbeats");
+      return;
+    }
+
+    if (!accounts || accounts.length === 0) {
+      return;
+    }
+
+    if (!sendHeartbeat.isPending) {
+      console.log(`💓 Enviando heartbeat a ${accounts.length} cuenta(s)...`);
+      
+      // Send heartbeats sequentially to avoid batching issues
+      for (const account of accounts) {
+        try {
+          await sendHeartbeat.mutateAsync({ id: account.id });
+          console.log(`✓ Heartbeat enviado a cuenta ${account.id.substring(0, 8)}...`);
+        } catch (err) {
+          console.error(`✗ Error enviando heartbeat a ${account.id.substring(0, 8)}:`, err);
+        }
+      }
+    }
+  }, [accounts, sendHeartbeat]);
+
   useEffect(() => {
     // Clear any existing interval
     if (intervalRef.current) {
@@ -75,39 +103,19 @@ export function useAllAccountsHeartbeat() {
       intervalRef.current = null;
     }
 
-    if (!accounts || accounts.length === 0) {
-      return;
+    // If accounts are loaded and we haven't initialized yet, send immediate heartbeat
+    if (accounts && accounts.length > 0 && !hasInitializedRef.current) {
+      console.log("🚀 Iniciando sistema de heartbeat...");
+      hasInitializedRef.current = true;
+      // Send initial heartbeat immediately when accounts are first loaded
+      doSendHeartbeatToAll();
     }
 
-    // Function to send heartbeat to all accounts
-    const doSendHeartbeatToAll = async () => {
-      // Only send heartbeat if page is visible (not in background tab)
-      if (typeof document !== 'undefined' && document.hidden) {
-        console.log("⏸️ Página en background - pausando heartbeats");
-        return;
-      }
-
-      if (!sendHeartbeat.isPending && accounts && accounts.length > 0) {
-        console.log(`💓 Enviando heartbeat a ${accounts.length} cuenta(s)...`);
-        
-        // Send heartbeats sequentially to avoid batching issues
-        for (const account of accounts) {
-          try {
-            await sendHeartbeat.mutateAsync({ id: account.id });
-            console.log(`✓ Heartbeat enviado a cuenta ${account.id.substring(0, 8)}...`);
-          } catch (err) {
-            console.error(`✗ Error enviando heartbeat a ${account.id.substring(0, 8)}:`, err);
-          }
-        }
-      }
-    };
-
-    // Send initial heartbeat immediately
-    console.log("🚀 Iniciando sistema de heartbeat...");
-    doSendHeartbeatToAll();
-
-    // Send heartbeat to all accounts every 30 seconds
-    intervalRef.current = setInterval(doSendHeartbeatToAll, 30000);
+    // Only set up interval if we have accounts
+    if (accounts && accounts.length > 0) {
+      // Send heartbeat to all accounts every 30 seconds
+      intervalRef.current = setInterval(doSendHeartbeatToAll, 30000);
+    }
 
     // Listen to visibility changes to pause/resume heartbeats
     const handleVisibilityChange = () => {
@@ -133,8 +141,14 @@ export function useAllAccountsHeartbeat() {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accounts?.length]); // Only depend on accounts length, not the mutation or accounts object
+  }, [accounts, doSendHeartbeatToAll]);
+
+  // Reset initialization flag when accounts change (e.g., user logs out/in)
+  useEffect(() => {
+    if (!accounts || accounts.length === 0) {
+      hasInitializedRef.current = false;
+    }
+  }, [accounts]);
 
   return null;
 }
