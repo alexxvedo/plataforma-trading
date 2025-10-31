@@ -322,26 +322,25 @@ bool TestConnection()
       Print("Ping response: ", response);
       
       // Parse lastHeartbeatSeconds from ping response
+      // Find the start of the value (after the colon)
       int pos = StringFind(response, "\"lastHeartbeatSeconds\":");
       if(pos >= 0)
       {
-         string substr = StringSubstr(response, pos + 24);
+         // Find where the actual number starts (skip "lastHeartbeatSeconds":)
+         int valueStart = pos + StringLen("\"lastHeartbeatSeconds\":");
+         string substr = StringSubstr(response, valueStart);
+         
+         // Find end of number (either , or })
          int endPos = StringFind(substr, ",");
          if(endPos < 0) endPos = StringFind(substr, "}");
-         
-         Print("   [DEBUG] substr: '", substr, "'");
-         Print("   [DEBUG] endPos: ", endPos);
          
          if(endPos > 0)
          {
             string valueStr = StringSubstr(substr, 0, endPos);
-            Print("   [DEBUG] valueStr antes trim: '", valueStr, "'");
             StringTrimLeft(valueStr);
             StringTrimRight(valueStr);
-            Print("   [DEBUG] valueStr después trim: '", valueStr, "'");
             
             int initialHeartbeat = (int)StringToInteger(valueStr);
-            Print("   [DEBUG] initialHeartbeat parseado: ", initialHeartbeat);
             
             if(initialHeartbeat >= 0 && initialHeartbeat < 999999)
             {
@@ -350,10 +349,6 @@ bool TestConnection()
                      " (", initialHeartbeat, "s desde último heartbeat)");
             }
          }
-      }
-      else
-      {
-         Print("   [DEBUG] No se encontró 'lastHeartbeatSeconds' en la respuesta");
       }
       
       return true;
@@ -765,8 +760,9 @@ bool SendRequest(string url, string jsonData)
       int pos = StringFind(response, "\"lastHeartbeatSeconds\":");
       if(pos >= 0)
       {
-         // Extraer el número después de los dos puntos
-         string substr = StringSubstr(response, pos + 24); // 24 = longitud de "lastHeartbeatSeconds":
+         // Extraer el número después de "lastHeartbeatSeconds":
+         int valueStart = pos + StringLen("\"lastHeartbeatSeconds\":");
+         string substr = StringSubstr(response, valueStart);
          
          // Encontrar el siguiente delimitador (coma o llave)
          int endPos = StringFind(substr, ",");
