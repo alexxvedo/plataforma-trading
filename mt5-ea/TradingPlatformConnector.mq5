@@ -11,9 +11,7 @@
 // Input parameters
 input string API_URL = "https://plataforma-trading.vercel.app/api/ea";  // URL de tu API
 input string API_KEY = "";                                 // API Key de tu cuenta
-input int    UPDATE_INTERVAL_ACTIVE = 5;                  // Intervalo cuando usuario está en web (segundos)
-input int    UPDATE_INTERVAL_IDLE = 1800;                 // Intervalo cuando usuario NO está en web (30 min)
-input int    CHECK_STATUS_INTERVAL = 30;                  // Intervalo para verificar estado del usuario (segundos)
+input int    UPDATE_INTERVAL = 5;                          // Intervalo de actualización (segundos)
 input bool   SEND_HISTORY = true;                         // Enviar historial al inicio
 input int    HISTORY_DAYS = 30;                           // Días de historial a enviar
 input bool   OPTIMIZE_BANDWIDTH = true;                   // Optimizar uso de datos (solo enviar si hay cambios)
@@ -23,9 +21,6 @@ input double MIN_BALANCE_CHANGE = 0.01;                   // Cambio mínimo de b
 datetime lastUpdate = 0;
 bool isInitialized = false;
 string sessionId = "";
-bool isUserActive = false;                   // Si hay usuario viendo la web
-int lastHeartbeatSeconds = 999999;           // Segundos desde último heartbeat del frontend
-int currentUpdateInterval = 5;               // Intervalo actual (dinámico)
 
 // Cache para detectar cambios (optimización)
 double lastBalance = 0;
@@ -56,11 +51,7 @@ int OnInit()
    }
    
    Print("API URL: ", API_URL);
-   Print("Intervalo cuando usuario activo: ", UPDATE_INTERVAL_ACTIVE, " segundos");
-   Print("Intervalo cuando usuario inactivo: ", UPDATE_INTERVAL_IDLE, " segundos");
-   
-   // Inicializar con intervalo activo
-   currentUpdateInterval = UPDATE_INTERVAL_ACTIVE;
+   Print("Intervalo de actualización: ", UPDATE_INTERVAL, " segundos");
    
    // Test de conexión
    if(!TestConnection())
@@ -86,8 +77,8 @@ int OnInit()
       SyncPositions();
    }
    
-   // Use fixed interval for checking user status (not dynamic)
-   EventSetTimer(CHECK_STATUS_INTERVAL);
+   // Configurar timer para envío periódico de datos
+   EventSetTimer(UPDATE_INTERVAL);
    
    return(INIT_SUCCEEDED);
 }
@@ -102,7 +93,7 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Timer function (optimizado para ahorrar bandwidth)                |
+//| Timer function - Siempre envía datos periódicamente              |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
@@ -117,64 +108,30 @@ void OnTimer()
       return;
    }
    
-   // SIEMPRE verificar estado del usuario (cada CHECK_STATUS_INTERVAL segundos)
-   // Frontend envía heartbeat cada 30s, consideramos activo si < 120s (2 minutos)
-   bool wasActive = isUserActive;
-   isUserActive = (lastHeartbeatSeconds < 120);
-   
-   // Detectar cambio de estado
-   if(wasActive != isUserActive)
-   {
-      if(isUserActive)
-      {
-         Print("✅ Usuario CONECTADO - Activando modo tiempo real");
-         lastUpdate = 0; // Reset para enviar inmediatamente
-      }
-      else
-      {
-         Print("⚠️ Usuario DESCONECTADO (", lastHeartbeatSeconds, "s sin heartbeat) - Reduciendo frecuencia");
-      }
-   }
-   
    // Decidir si enviar datos basándose en el tiempo transcurrido
    datetime now = TimeCurrent();
    int secondsSinceLastUpdate = (int)(now - lastUpdate);
    
-   // Determinar intervalo actual según estado del usuario
-   int requiredInterval = isUserActive ? UPDATE_INTERVAL_ACTIVE : UPDATE_INTERVAL_IDLE;
-   
    bool shouldSend = false;
    
-   if(secondsSinceLastUpdate >= requiredInterval)
+   if(secondsSinceLastUpdate >= UPDATE_INTERVAL)
    {
-      if(isUserActive)
+      // Enviar solo si hay cambios (optimizado) o siempre según configuración
+      if(OPTIMIZE_BANDWIDTH)
       {
-         // Usuario activo: enviar solo si hay cambios (optimizado)
-         if(OPTIMIZE_BANDWIDTH)
-         {
-            if(HasSignificantChanges())
-            {
-               shouldSend = true;
-            }
-         }
-         else
+         if(HasSignificantChanges())
          {
             shouldSend = true;
          }
       }
       else
       {
-         // Usuario inactivo: enviar siempre (cada 30 min para actualizar BD)
          shouldSend = true;
       }
    }
    
    if(shouldSend)
    {
-      if(!isUserActive)
-      {
-         Print("📊 Actualización periódica (usuario inactivo - ", lastHeartbeatSeconds, "s sin heartbeat)");
-      }
       SendAccountSnapshot();
       UpdatePositions();
       UpdateCache();
@@ -321,39 +278,7 @@ bool TestConnection()
    
    if(res == 200)
    {
-      string response = CharArrayToString(result);
-      Print("Ping response: ", response);
-      
-      // Parse lastHeartbeatSeconds from ping response
-      // Find the start of the value (after the colon)
-      int pos = StringFind(response, "\"lastHeartbeatSeconds\":");
-      if(pos >= 0)
-      {
-         // Find where the actual number starts (skip "lastHeartbeatSeconds":)
-         int valueStart = pos + StringLen("\"lastHeartbeatSeconds\":");
-         string substr = StringSubstr(response, valueStart);
-         
-         // Find end of number (either , or })
-         int endPos = StringFind(substr, ",");
-         if(endPos < 0) endPos = StringFind(substr, "}");
-         
-         if(endPos > 0)
-         {
-            string valueStr = StringSubstr(substr, 0, endPos);
-            StringTrimLeft(valueStr);
-            StringTrimRight(valueStr);
-            
-            int initialHeartbeat = (int)StringToInteger(valueStr);
-            
-            if(initialHeartbeat >= 0 && initialHeartbeat < 999999)
-            {
-               lastHeartbeatSeconds = initialHeartbeat;
-               Print("   → Estado inicial: ", (initialHeartbeat < 120 ? "Usuario ACTIVO" : "Usuario INACTIVO"), 
-                     " (", initialHeartbeat, "s desde último heartbeat)");
-            }
-         }
-      }
-      
+      Print("✓ Ping exitoso - Conexión establecida");
       return true;
    }
    else if(res == -1)
@@ -756,37 +681,6 @@ bool SendRequest(string url, string jsonData)
    
    if(res == 200)
    {
-      // Parse response to extract lastHeartbeatSeconds
-      string response = CharArrayToString(result);
-      
-      // Buscar "lastHeartbeatSeconds": en la respuesta
-      int pos = StringFind(response, "\"lastHeartbeatSeconds\":");
-      if(pos >= 0)
-      {
-         // Extraer el número después de "lastHeartbeatSeconds":
-         int valueStart = pos + StringLen("\"lastHeartbeatSeconds\":");
-         string substr = StringSubstr(response, valueStart);
-         
-         // Encontrar el siguiente delimitador (coma o llave)
-         int endPos = StringFind(substr, ",");
-         if(endPos < 0) endPos = StringFind(substr, "}");
-         
-         if(endPos > 0)
-         {
-            string valueStr = StringSubstr(substr, 0, endPos);
-            StringTrimLeft(valueStr);
-            StringTrimRight(valueStr);
-            
-            int newHeartbeatSeconds = (int)StringToInteger(valueStr);
-            
-            // Solo actualizar si es un valor válido
-            if(newHeartbeatSeconds >= 0 && newHeartbeatSeconds < 999999)
-            {
-               lastHeartbeatSeconds = newHeartbeatSeconds;
-            }
-         }
-      }
-      
       return true;
    }
    else if(res == -1)

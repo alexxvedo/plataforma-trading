@@ -108,32 +108,20 @@ const tradeHistorySchema = z.object({
 });
 
 export const eaRouter = t.router({
-  // Heartbeat - EA calls this to confirm connection
-  // Changed to mutation so it accepts POST requests from EA
+  // Ping - EA calls this to confirm connection
   ping: eaProcedure.mutation(async ({ ctx }) => {
-    let { tradingAccount } = ctx;
+    const { tradingAccount } = ctx;
 
-    // Initialize lastSync if null (EA started before user connected)
-    if (!tradingAccount.lastSync) {
-      tradingAccount = await prisma.tradingAccount.update({
-        where: { id: tradingAccount.id },
-        data: { lastSync: new Date(0) }, // Unix epoch = very old, so EA knows user is inactive
-      });
-    }
-
-    // Calculate seconds since last heartbeat
-    const lastHeartbeatSeconds = tradingAccount.lastSync 
-      ? Math.floor((Date.now() - tradingAccount.lastSync.getTime()) / 1000)
-      : 999999;
-
-    // Debug log
-    console.log(`[PING] Account ${tradingAccount.id.substring(0, 8)}... - lastSync: ${tradingAccount.lastSync?.toISOString() || 'null'}, seconds: ${lastHeartbeatSeconds}`);
+    // Update lastSync to indicate EA is active
+    await prisma.tradingAccount.update({
+      where: { id: tradingAccount.id },
+      data: { lastSync: new Date() },
+    });
 
     return {
       success: true,
       accountId: tradingAccount.id,
       timestamp: new Date().toISOString(),
-      lastHeartbeatSeconds, // Tell EA immediately if user is active
     };
   }),
 
@@ -159,16 +147,15 @@ export const eaRouter = t.router({
         },
       });
 
-      // Calculate seconds since last heartbeat from frontend
-      // lastSync is updated by frontend heartbeat (sendHeartbeat mutation)
-      const lastHeartbeatSeconds = tradingAccount.lastSync 
-        ? Math.floor((Date.now() - tradingAccount.lastSync.getTime()) / 1000)
-        : 999999; // Very large number if never synced
+      // Update lastSync to indicate EA is active and sending data
+      await prisma.tradingAccount.update({
+        where: { id: tradingAccount.id },
+        data: { lastSync: new Date() },
+      });
 
       return { 
         success: true, 
         snapshotId: snapshot.id,
-        lastHeartbeatSeconds, // EA usa esto para saber si hay usuario activo
       };
     }),
 
@@ -209,15 +196,15 @@ export const eaRouter = t.router({
         }
       });
 
-      // Calculate seconds since last heartbeat from frontend
-      const lastHeartbeatSeconds = tradingAccount.lastSync
-        ? Math.floor((Date.now() - tradingAccount.lastSync.getTime()) / 1000)
-        : 999999;
+      // Update lastSync to indicate EA is active and sending data
+      await prisma.tradingAccount.update({
+        where: { id: tradingAccount.id },
+        data: { lastSync: new Date() },
+      });
 
       return { 
         success: true, 
         positionsCount: input.positions.length,
-        lastHeartbeatSeconds,
       };
     }),
 
@@ -261,15 +248,15 @@ export const eaRouter = t.router({
         },
       });
 
-      // Calculate seconds since last heartbeat from frontend
-      const lastHeartbeatSeconds = tradingAccount.lastSync
-        ? Math.floor((Date.now() - tradingAccount.lastSync.getTime()) / 1000)
-        : 999999;
+      // Update lastSync to indicate EA is active and sending data
+      await prisma.tradingAccount.update({
+        where: { id: tradingAccount.id },
+        data: { lastSync: new Date() },
+      });
 
       return { 
         success: true, 
         positionId: position.id,
-        lastHeartbeatSeconds,
       };
     }),
 
@@ -324,6 +311,12 @@ export const eaRouter = t.router({
         });
       });
 
+      // Update lastSync to indicate EA is active and sending data
+      await prisma.tradingAccount.update({
+        where: { id: tradingAccount.id },
+        data: { lastSync: new Date() },
+      });
+
       return { success: true };
     }),
 
@@ -376,6 +369,12 @@ export const eaRouter = t.router({
             },
           });
         }
+      });
+
+      // Update lastSync to indicate EA is active and sending data
+      await prisma.tradingAccount.update({
+        where: { id: tradingAccount.id },
+        data: { lastSync: new Date() },
       });
 
       return { success: true, tradesCount: input.trades.length };

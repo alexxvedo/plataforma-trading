@@ -40,16 +40,10 @@ export default function AccountDetailPage() {
   const trpc = useTRPC();
   const accountId = params.id as string;
 
-  // Queries con polling inteligente
+  // Queries con polling periódico
   const accountQuery = useQuery({
     ...trpc.tradingAccount.getAccountById.queryOptions({ id: accountId }),
-    refetchInterval: (query) => {
-      const data = query.state.data as any;
-      if (!data?.lastSync) return 10000;
-      
-      const timeSinceSync = Date.now() - new Date(data.lastSync).getTime();
-      return timeSinceSync < 30000 ? 1000 : 10000; // 1s si activo, 10s si no
-    },
+    refetchInterval: 5000, // Actualizar cada 5 segundos
     refetchIntervalInBackground: true,
   });
 
@@ -98,8 +92,10 @@ export default function AccountDetailPage() {
   }
 
   const latestSnapshot = account.snapshots?.[0];
-  const isConnected = account.lastSync && 
-    (Date.now() - new Date(account.lastSync).getTime() < 30000);
+  
+  // Check if EA is sending data (lastSync within last 60 seconds)
+  const isEAActive = account.lastSync && 
+    (Date.now() - new Date(account.lastSync).getTime() < 60000);
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -117,10 +113,10 @@ export default function AccountDetailPage() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-3xl font-bold">{account.accountNumber}</h1>
-              {isConnected ? (
-                <Badge className="bg-green-600">● Conectado</Badge>
+              {isEAActive ? (
+                <Badge className="bg-green-600">● EA Activa</Badge>
               ) : (
-                <Badge variant="destructive">Desconectado</Badge>
+                <Badge variant="destructive">EA Inactiva</Badge>
               )}
             </div>
             <p className="text-muted-foreground">
