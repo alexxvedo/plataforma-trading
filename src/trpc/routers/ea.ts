@@ -59,6 +59,19 @@ const isEAAuthenticated = t.middleware(async ({ ctx, next }) => {
 
 const eaProcedure = t.procedure.use(isEAAuthenticated);
 
+// Helper function to find and associate EA by magic number
+async function findEAByMagicNumber(tradingAccountId: string, magicNumber?: number | null) {
+  if (!magicNumber) return null;
+  
+  return await prisma.expertAdvisor.findFirst({
+    where: {
+      tradingAccountId,
+      magicNumber,
+      isActive: true,
+    },
+  });
+}
+
 // Validation schemas
 const accountSnapshotSchema = z.object({
   balance: z.number(),
@@ -165,6 +178,16 @@ export const eaRouter = t.router({
     .mutation(async ({ ctx, input }) => {
       const { tradingAccount } = ctx;
 
+      // Get all EAs for this account to map magic numbers
+      const expertAdvisors = await prisma.expertAdvisor.findMany({
+        where: {
+          tradingAccountId: tradingAccount.id,
+          isActive: true,
+        },
+      });
+
+      const eaMap = new Map(expertAdvisors.map(ea => [ea.magicNumber, ea.id]));
+
       // Start a transaction to replace all positions
       await prisma.$transaction(async (tx) => {
         // Delete all existing positions
@@ -172,7 +195,7 @@ export const eaRouter = t.router({
           where: { tradingAccountId: tradingAccount.id },
         });
 
-        // Create new positions
+        // Create new positions with EA associations
         if (input.positions.length > 0) {
           await tx.position.createMany({
             data: input.positions.map((pos) => ({
@@ -191,6 +214,7 @@ export const eaRouter = t.router({
               openTime: new Date(pos.openTime),
               comment: pos.comment,
               magicNumber: pos.magicNumber,
+              expertAdvisorId: pos.magicNumber ? eaMap.get(pos.magicNumber) || null : null,
             })),
           });
         }
@@ -202,9 +226,14 @@ export const eaRouter = t.router({
         data: { lastSync: new Date() },
       });
 
+      const associatedCount = input.positions.filter(pos => 
+        pos.magicNumber && eaMap.has(pos.magicNumber)
+      ).length;
+
       return { 
         success: true, 
         positionsCount: input.positions.length,
+        associatedWithEAs: associatedCount,
       };
     }),
 
@@ -213,6 +242,9 @@ export const eaRouter = t.router({
     .input(positionSchema)
     .mutation(async ({ ctx, input }) => {
       const { tradingAccount } = ctx;
+
+      // Find EA by magic number
+      const expertAdvisor = await findEAByMagicNumber(tradingAccount.id, input.magicNumber);
 
       const position = await prisma.position.upsert({
         where: {
@@ -256,7 +288,8 @@ export const eaRouter = t.router({
 
       return { 
         success: true, 
-        positionId: position.id,
+        position,
+        associatedEA: expertAdvisor?.name || null,
       };
     }),
 
@@ -265,6 +298,9 @@ export const eaRouter = t.router({
     .input(tradeHistorySchema)
     .mutation(async ({ ctx, input }) => {
       const { tradingAccount } = ctx;
+
+      // Find EA by magic number
+      const expertAdvisor = await findEAByMagicNumber(tradingAccount.id, input.magicNumber);
 
       await prisma.$transaction(async (tx) => {
         // Remove from open positions
@@ -289,6 +325,7 @@ export const eaRouter = t.router({
             swap: input.swap,
             commission: input.commission,
             closeTime: new Date(input.closeTime),
+            expertAdvisorId: expertAdvisor?.id,
           },
           create: {
             tradingAccountId: tradingAccount.id,
@@ -307,8 +344,25 @@ export const eaRouter = t.router({
             closeTime: new Date(input.closeTime),
             comment: input.comment,
             magicNumber: input.magicNumber,
+            expertAdvisorId: expertAdvisor?.id,
           },
         });
+
+        // Update EA statistics if associated
+        if (expertAdvisor) {
+          const isWinningTrade = input.profit > 0;
+          await tx.expertAdvisor.update({
+            where: { id: expertAdvisor.id },
+            data: {
+              totalTrades: { increment: 1 },
+              winningTrades: isWinningTrade ? { increment: 1 } : undefined,
+              losingTrades: !isWinningTrade ? { increment: 1 } : undefined,
+              totalProfit: isWinningTrade ? { increment: input.profit } : undefined,
+              totalLoss: !isWinningTrade ? { increment: Math.abs(input.profit) } : undefined,
+              lastTradeAt: new Date(input.closeTime),
+            },
+          });
+        }
       });
 
       // Update lastSync to indicate EA is active and sending data
@@ -317,7 +371,10 @@ export const eaRouter = t.router({
         data: { lastSync: new Date() },
       });
 
-      return { success: true };
+      return { 
+        success: true, 
+        associatedEA: expertAdvisor?.name || null,
+      };
     }),
 
   // Bulk sync history (for initial sync)

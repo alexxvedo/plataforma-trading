@@ -110,6 +110,7 @@ model TradingAccount {
   snapshots     AccountSnapshot[]
   positions     Position[]
   tradesHistory TradeHistory[]
+  expertAdvisors ExpertAdvisor[]
   masterOf      CopyTradingRelation[] @relation("MasterAccount")
   slaveOf       CopyTradingRelation[] @relation("SlaveAccount")
 
@@ -172,10 +173,15 @@ model Position {
   // Metadata
   comment           String?
   magicNumber       Int?
+  
+  // EA Relation
+  expertAdvisorId   String?
+  expertAdvisor     ExpertAdvisor?  @relation("EAPositions", fields: [expertAdvisorId], references: [id])
 
   @@unique([tradingAccountId, ticket])
   @@index([tradingAccountId])
   @@index([symbol])
+  @@index([expertAdvisorId])
   @@map("position")
 }
 
@@ -209,11 +215,16 @@ model TradeHistory {
   comment           String?
   magicNumber       Int?
   
+  // EA Relation
+  expertAdvisorId   String?
+  expertAdvisor     ExpertAdvisor?  @relation("EATrades", fields: [expertAdvisorId], references: [id])
+  
   createdAt         DateTime        @default(now())
 
   @@unique([tradingAccountId, ticket])
   @@index([tradingAccountId, closeTime])
   @@index([symbol])
+  @@index([expertAdvisorId])
   @@map("trade_history")
 }
 
@@ -243,6 +254,48 @@ model CopyTradingRelation {
   @@index([masterAccountId])
   @@index([slaveAccountId])
   @@map("copy_trading_relation")
+}
+
+model ExpertAdvisor {
+  id                String          @id @default(cuid())
+  tradingAccountId  String
+  tradingAccount    TradingAccount  @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+  
+  // EA Configuration
+  name              String          // User-friendly name like "ORO", "EURUSD Scalper", etc.
+  description       String?         // Optional description
+  magicNumber       Int             // Magic number to identify trades from this EA
+  
+  // EA Settings
+  isActive          Boolean         @default(true)
+  color             String?         // Hex color for UI display
+  
+  // Statistics (calculated fields)
+  totalTrades       Int             @default(0)
+  winningTrades     Int             @default(0)
+  losingTrades      Int             @default(0)
+  totalProfit       Float           @default(0)
+  totalLoss         Float           @default(0)
+  
+  // Risk metrics
+  maxDrawdown       Float?
+  maxProfit         Float?
+  averageWin        Float?
+  averageLoss       Float?
+  
+  // Timestamps
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  lastTradeAt       DateTime?
+  
+  // Relations
+  positions         Position[]      @relation("EAPositions")
+  tradesHistory     TradeHistory[]  @relation("EATrades")
+
+  @@unique([tradingAccountId, magicNumber])
+  @@index([tradingAccountId])
+  @@index([magicNumber])
+  @@map("expert_advisor")
 }
 
 // Enums

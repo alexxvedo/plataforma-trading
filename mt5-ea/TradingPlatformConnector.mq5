@@ -8,6 +8,8 @@
 #property version   "1.00"
 #property strict
 
+#include "CHistoryPositionInfo.mqh"
+
 // Input parameters
 input string API_URL = "https://plataforma-trading.vercel.app/api/ea";  // URL de tu API
 input string API_KEY = "";                                 // API Key de tu cuenta
@@ -81,6 +83,69 @@ int OnInit()
    EventSetTimer(UPDATE_INTERVAL);
    
    return(INIT_SUCCEEDED);
+}
+
+//+------------------------------------------------------------------+
+//| Obtener JSON de una posición histórica usando CHistoryPositionInfo|
+//+------------------------------------------------------------------+
+string GetHistoryPositionJSON(CHistoryPositionInfo &histPosition)
+{
+   // Obtener todos los datos de la posición usando la librería
+   ulong ticket = histPosition.Ticket();
+   string symbol = histPosition.Symbol();
+   ENUM_POSITION_TYPE posType = histPosition.PositionType();
+   string typeStr = (posType == POSITION_TYPE_BUY) ? "BUY" : "SELL";
+   double volume = histPosition.Volume();
+   double openPrice = histPosition.PriceOpen();
+   double closePrice = histPosition.PriceClose();
+   double stopLoss = histPosition.StopLoss();
+   double takeProfit = histPosition.TakeProfit();
+   double profit = histPosition.Profit();
+   double swap = histPosition.Swap();
+   double commission = histPosition.Commission();
+   datetime openTime = histPosition.TimeOpen();
+   datetime closeTime = histPosition.TimeClose();
+   long magic = histPosition.Magic();
+   string openComment = histPosition.OpenComment();
+   string closeComment = histPosition.CloseComment();
+   
+   // Usar el comentario de apertura como comentario principal
+   string comment = (StringLen(openComment) > 0) ? openComment : closeComment;
+   
+   string json = "{";
+   json += "\"ticket\":\"" + IntegerToString(ticket) + "\",";
+   json += "\"symbol\":\"" + symbol + "\",";
+   json += "\"type\":\"" + typeStr + "\",";
+   json += "\"volume\":" + DoubleToString(volume, 2) + ",";
+   json += "\"openPrice\":" + DoubleToString(openPrice, 5) + ",";
+   json += "\"closePrice\":" + DoubleToString(closePrice, 5) + ",";
+   json += "\"stopLoss\":" + DoubleToString(stopLoss, 5) + ",";
+   json += "\"takeProfit\":" + DoubleToString(takeProfit, 5) + ",";
+   json += "\"profit\":" + DoubleToString(profit, 2) + ",";
+   json += "\"swap\":" + DoubleToString(swap, 2) + ",";
+   json += "\"commission\":" + DoubleToString(commission, 2) + ",";
+   
+   // Convertir datetime a formato ISO 8601 - Open time
+   MqlDateTime dtOpen;
+   TimeToStruct(openTime, dtOpen);
+   string isoOpenTime = StringFormat("%04d-%02d-%02dT%02d:%02d:%02d.000Z",
+                                   dtOpen.year, dtOpen.mon, dtOpen.day,
+                                   dtOpen.hour, dtOpen.min, dtOpen.sec);
+   
+   // Convertir datetime a formato ISO 8601 - Close time
+   MqlDateTime dtClose;
+   TimeToStruct(closeTime, dtClose);
+   string isoCloseTime = StringFormat("%04d-%02d-%02dT%02d:%02d:%02d.000Z",
+                                   dtClose.year, dtClose.mon, dtClose.day,
+                                   dtClose.hour, dtClose.min, dtClose.sec);
+   
+   json += "\"openTime\":\"" + isoOpenTime + "\",";
+   json += "\"closeTime\":\"" + isoCloseTime + "\",";
+   json += "\"comment\":\"" + comment + "\",";
+   json += "\"magicNumber\":" + IntegerToString(magic);
+   json += "}";
+   
+   return json;
 }
 
 //+------------------------------------------------------------------+
@@ -167,67 +232,38 @@ bool SendRecentClosedTrades(int days = 1)
    datetime from = TimeCurrent() - (days * 86400); // 86400 = segundos en un día
    datetime to = TimeCurrent();
    
-   if(!HistorySelect(from, to))
+   // Usar CHistoryPositionInfo para obtener posiciones cerradas
+   CHistoryPositionInfo histPosition;
+   
+   if(!histPosition.HistorySelect(from, to))
    {
-      Print("No se pudo seleccionar el historial");
+      Print("No se pudo seleccionar el historial de posiciones");
       return false;
    }
    
-   int totalDeals = HistoryDealsTotal();
+   int totalPositions = histPosition.PositionsTotal();
    
-   if(totalDeals == 0)
+   if(totalPositions == 0)
    {
-      Print("No hay deals en el historial reciente");
+      Print("No hay posiciones cerradas en el historial reciente");
       return true;
    }
    
-   // Recopilar posiciones cerradas únicas
    string closedPositions = "";
    int closedCount = 0;
    
-   // Usar un array para trackear posiciones ya procesadas
-   ulong processedPositions[];
-   ArrayResize(processedPositions, 0);
-   
-   for(int i = 0; i < totalDeals; i++)
+   // Iterar a través de todas las posiciones cerradas
+   for(int i = 0; i < totalPositions; i++)
    {
-      ulong dealTicket = HistoryDealGetTicket(i);
-      
-      if(dealTicket > 0)
+      if(histPosition.SelectByIndex(i))
       {
-         long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
-         ulong positionId = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+         if(closedCount > 0) closedPositions += ",";
          
-         // Solo procesar deals de salida (cierres)
-         if(dealEntry == DEAL_ENTRY_OUT && positionId > 0)
+         string tradeJson = GetHistoryPositionJSON(histPosition);
+         if(StringLen(tradeJson) > 0)
          {
-            // Verificar si ya procesamos esta posición
-            bool alreadyProcessed = false;
-            for(int j = 0; j < ArraySize(processedPositions); j++)
-            {
-               if(processedPositions[j] == positionId)
-               {
-                  alreadyProcessed = true;
-                  break;
-               }
-            }
-            
-            if(!alreadyProcessed)
-            {
-               // Agregar a la lista de procesadas
-               ArrayResize(processedPositions, ArraySize(processedPositions) + 1);
-               processedPositions[ArraySize(processedPositions) - 1] = positionId;
-               
-               // Enviar este trade cerrado
-               if(closedCount > 0) closedPositions += ",";
-               
-               string tradeJson = GetHistoricalTradeJSON(positionId);
-               if(StringLen(tradeJson) > 0)
-               {
-                  closedPositions += tradeJson;
-                  closedCount++;
-               }
-            }
+            closedPositions += tradeJson;
+            closedCount++;
          }
       }
    }
@@ -452,7 +488,7 @@ string GetPositionJSON(ulong ticket)
 }
 
 //+------------------------------------------------------------------+
-//| Sincronizar historial de operaciones                              |
+//| Sincronizar historial de operaciones usando CHistoryPositionInfo |
 //+------------------------------------------------------------------+
 bool SyncHistory(int days)
 {
@@ -461,77 +497,36 @@ bool SyncHistory(int days)
    datetime from = TimeCurrent() - (days * 86400); // days * segundos por día
    datetime to = TimeCurrent();
    
-   HistorySelect(from, to);
+   // Crear instancia de CHistoryPositionInfo
+   CHistoryPositionInfo histPosition;
    
-   // Crear array para almacenar posiciones ya procesadas
-   ulong processedPositions[];
-   ArrayResize(processedPositions, 0);
+   // Seleccionar historial de posiciones cerradas
+   if(!histPosition.HistorySelect(from, to))
+   {
+      Print("Error: No se pudo seleccionar el historial de posiciones");
+      return false;
+   }
+   
+   int totalPositions = histPosition.PositionsTotal();
+   
+   if(totalPositions == 0)
+   {
+      Print("No hay posiciones cerradas en el período especificado");
+      return true;
+   }
    
    // Formato tRPC batch
    string json = "{\"0\":{\"trades\":[";
    int count = 0;
    
-   // Primero, buscar todas las posiciones cerradas desde los deals
-   int totalDeals = HistoryDealsTotal();
-   
-   for(int i = 0; i < totalDeals; i++)
+   // Procesar todas las posiciones cerradas
+   for(int i = 0; i < totalPositions; i++)
    {
-      ulong dealTicket = HistoryDealGetTicket(i);
-      
-      if(dealTicket > 0)
+      if(histPosition.SelectByIndex(i))
       {
-         long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
-         
-         // Solo procesar deals de salida (cierre de posición)
-         if(dealEntry == DEAL_ENTRY_OUT)
-         {
-            ulong positionId = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
-            
-            if(positionId > 0)
-            {
-               // Verificar que no hayamos procesado esta posición antes
-               bool alreadyProcessed = false;
-               for(int j = 0; j < ArraySize(processedPositions); j++)
-               {
-                  if(processedPositions[j] == positionId)
-                  {
-                     alreadyProcessed = true;
-                     break;
-                  }
-               }
-               
-               if(!alreadyProcessed)
-               {
-                  // Buscar la orden de apertura para esta posición
-                  int totalOrders = HistoryOrdersTotal();
-                  for(int k = 0; k < totalOrders; k++)
-                  {
-                     ulong orderTicket = HistoryOrderGetTicket(k);
-                     if(orderTicket > 0)
-                     {
-                        ulong orderPositionId = HistoryOrderGetInteger(orderTicket, ORDER_POSITION_ID);
-                        long orderType = HistoryOrderGetInteger(orderTicket, ORDER_TYPE);
-                        
-                        // Encontrar la orden de apertura (BUY o SELL de mercado)
-                        if(orderPositionId == positionId && 
-                           (orderType == ORDER_TYPE_BUY || orderType == ORDER_TYPE_SELL))
-                        {
-                           // Agregar esta operación
-                           if(count > 0) json += ",";
-                           json += GetHistoricalTradeJSON(orderTicket);
-                           count++;
-                           
-                           // Marcar esta posición como procesada
-                           ArrayResize(processedPositions, ArraySize(processedPositions) + 1);
-                           processedPositions[ArraySize(processedPositions) - 1] = positionId;
-                           
-                           break; // Ya encontramos la orden de esta posición
-                        }
-                     }
-                  }
-               }
-            }
-         }
+         if(count > 0) json += ",";
+         json += GetHistoryPositionJSON(histPosition);
+         count++;
       }
    }
    
@@ -540,116 +535,6 @@ bool SyncHistory(int days)
    Print("Enviando ", count, " operaciones cerradas al servidor...");
    
    return SendRequest(url, json);
-}
-
-//+------------------------------------------------------------------+
-//| Obtener JSON de un trade histórico                                |
-//+------------------------------------------------------------------+
-string GetHistoricalTradeJSON(ulong ticket)
-{
-   // Obtener información de la orden
-   string symbol = HistoryOrderGetString(ticket, ORDER_SYMBOL);
-   long type = HistoryOrderGetInteger(ticket, ORDER_TYPE);
-   double volume = HistoryOrderGetDouble(ticket, ORDER_VOLUME_INITIAL); // Volumen INICIAL, no CURRENT
-   long magic = HistoryOrderGetInteger(ticket, ORDER_MAGIC);
-   string comment = HistoryOrderGetString(ticket, ORDER_COMMENT);
-   double sl = HistoryOrderGetDouble(ticket, ORDER_SL);
-   double tp = HistoryOrderGetDouble(ticket, ORDER_TP);
-   
-   // Obtener deals asociados para todos los datos de ejecución
-   double openPrice = 0;
-   double closePrice = 0;
-   double totalProfit = 0;
-   double totalSwap = 0;
-   double totalCommission = 0;
-   datetime openTime = 0;
-   datetime closeTime = 0;
-   
-   // Seleccionar deals por posición
-   ulong positionId = HistoryOrderGetInteger(ticket, ORDER_POSITION_ID);
-   if(positionId > 0)
-   {
-      // Buscar deals de esta posición
-      int totalDeals = HistoryDealsTotal();
-      for(int i = 0; i < totalDeals; i++)
-      {
-         ulong dealTicket = HistoryDealGetTicket(i);
-         if(dealTicket > 0)
-         {
-            ulong dealPosition = HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
-            if(dealPosition == positionId)
-            {
-               long dealEntry = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
-               
-               // Deal de entrada (apertura)
-               if(dealEntry == DEAL_ENTRY_IN)
-               {
-                  openPrice = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
-                  openTime = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
-                  totalCommission += HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
-               }
-               // Deal de salida (cierre)
-               else if(dealEntry == DEAL_ENTRY_OUT)
-               {
-                  closePrice = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
-                  closeTime = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
-                  totalProfit += HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
-                  totalSwap += HistoryDealGetDouble(dealTicket, DEAL_SWAP);
-                  totalCommission += HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
-               }
-            }
-         }
-      }
-   }
-   
-   // Si no encontramos deals, usar datos de la orden (fallback)
-   if(openPrice == 0)
-   {
-      openPrice = HistoryOrderGetDouble(ticket, ORDER_PRICE_OPEN);
-      openTime = (datetime)HistoryOrderGetInteger(ticket, ORDER_TIME_SETUP);
-   }
-   if(closePrice == 0)
-   {
-      closePrice = HistoryOrderGetDouble(ticket, ORDER_PRICE_CURRENT);
-      closeTime = (datetime)HistoryOrderGetInteger(ticket, ORDER_TIME_DONE);
-   }
-   
-   string typeStr = (type == ORDER_TYPE_BUY) ? "BUY" : "SELL";
-   
-   string json = "{";
-   json += "\"ticket\":\"" + IntegerToString(ticket) + "\",";
-   json += "\"symbol\":\"" + symbol + "\",";
-   json += "\"type\":\"" + typeStr + "\",";
-   json += "\"volume\":" + DoubleToString(volume, 2) + ",";
-   json += "\"openPrice\":" + DoubleToString(openPrice, 5) + ",";
-   json += "\"closePrice\":" + DoubleToString(closePrice, 5) + ",";
-   json += "\"stopLoss\":" + DoubleToString(sl, 5) + ",";
-   json += "\"takeProfit\":" + DoubleToString(tp, 5) + ",";
-   json += "\"profit\":" + DoubleToString(totalProfit, 2) + ",";
-   json += "\"swap\":" + DoubleToString(totalSwap, 2) + ",";
-   json += "\"commission\":" + DoubleToString(totalCommission, 2) + ",";
-   
-   // Convertir datetime a formato ISO 8601 - Open time
-   MqlDateTime dtOpen;
-   TimeToStruct(openTime, dtOpen);
-   string isoOpenTime = StringFormat("%04d-%02d-%02dT%02d:%02d:%02d.000Z",
-                                   dtOpen.year, dtOpen.mon, dtOpen.day,
-                                   dtOpen.hour, dtOpen.min, dtOpen.sec);
-   
-   // Convertir datetime a formato ISO 8601 - Close time
-   MqlDateTime dtClose;
-   TimeToStruct(closeTime, dtClose);
-   string isoCloseTime = StringFormat("%04d-%02d-%02dT%02d:%02d:%02d.000Z",
-                                   dtClose.year, dtClose.mon, dtClose.day,
-                                   dtClose.hour, dtClose.min, dtClose.sec);
-   
-   json += "\"openTime\":\"" + isoOpenTime + "\",";
-   json += "\"closeTime\":\"" + isoCloseTime + "\",";
-   json += "\"comment\":\"" + comment + "\",";
-   json += "\"magicNumber\":" + IntegerToString(magic);
-   json += "}";
-   
-   return json;
 }
 
 //+------------------------------------------------------------------+
