@@ -96,9 +96,8 @@ export function EAStatistics({ accountId }: EAStatisticsProps) {
       accountId,
       name: formData.name,
       description: formData.description,
-      symbol: formData.symbol,
-      magicNumber: formData.magicNumber ? parseInt(formData.magicNumber) : undefined,
-      version: formData.version
+      // Asegurar tipo number: si no hay valor, usar 0 por defecto
+      magicNumber: parseInt(formData.magicNumber || "0"),
     });
   };
 

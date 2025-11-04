@@ -11,7 +11,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ArrowLeft, TrendingUp, TrendingDown, BarChart3, DollarSign, Target, Clock } from "lucide-react";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Position, Trade } from "@/lib/types";
 
 export default function EADetailPage() {
   const params = useParams();
@@ -46,7 +45,7 @@ export default function EADetailPage() {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {[...Array(4)].map((_, i) => (
-            <Card key={i}>
+            <Card key={_}>
               <CardHeader className="pb-2">
                 <Skeleton className="h-4 w-24" />
               </CardHeader>
@@ -106,7 +105,7 @@ export default function EADetailPage() {
           <div className="flex items-center gap-3">
             <div
               className={`w-4 h-4 rounded-full`}
-              style={{ backgroundColor: ea.color }}
+              style={{ backgroundColor: ea.color ?? undefined }}
             />
             <div>
               <h1 className="text-3xl font-bold">{ea.name}</h1>
@@ -292,7 +291,7 @@ export default function EADetailPage() {
                     {ea.positions.map((position: any, index: number) => {
                       const netProfit = position.profit + (position.swap || 0) + (position.commission || 0);
                       return (
-                        <TableRow key={index} className="hover:bg-muted/50 transition-colors">
+                        <TableRow key={position.id} className="hover:bg-muted/50 transition-colors">
                           <TableCell className="font-mono text-xs">
                             {position.ticket}
                           </TableCell>
@@ -377,7 +376,7 @@ export default function EADetailPage() {
                     {ea.tradesHistory.map((trade: any, index: number) => {
                       const netProfit = trade.profit + (trade.swap || 0) + (trade.commission || 0);
                       return (
-                        <TableRow key={index}>
+                        <TableRow key={trade.id}>
                           <TableCell className="font-mono text-xs">
                             {trade.ticket}
                           </TableCell>
